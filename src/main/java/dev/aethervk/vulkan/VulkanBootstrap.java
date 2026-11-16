@@ -439,8 +439,7 @@ logger.info("[AetherVK] GLFW Vulkan surface extensions enabled.");
                         .imageColorSpace(selectedFormat.colorSpace())
                         .imageExtent(extent)
                         .imageArrayLayers(1)
-                        .imageUsage(VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT
-                              | org.lwjgl.vulkan.VK10.VK_IMAGE_USAGE_TRANSFER_SRC_BIT) 
+                        .imageUsage(VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT) 
                         .imageSharingMode(VK_SHARING_MODE_EXCLUSIVE)
                         .preTransform(capabilities.currentTransform())
                         .compositeAlpha(compositeAlpha)
@@ -461,7 +460,6 @@ logger.info("[AetherVK] GLFW Vulkan surface extensions enabled.");
 
 logger.info("[AetherVK] DEBUG selected swapchain format={}", selectedFormat.format());
 logger.info("[AetherVK] DEBUG selected color space={}", selectedFormat.colorSpace());
-logger.info("[AetherVK] DEBUG clear RGBA=(0.025, 0.075, 0.22, 1.0)");
         IntBuffer actualImageCount = stack.ints(0);
         checkVk(
                 org.lwjgl.vulkan.KHRSwapchain.vkGetSwapchainImagesKHR(

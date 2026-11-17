@@ -72,6 +72,12 @@ final class TrianglePipeline {
     }
 
     private static long pipelineLayout = 0L;
+    private static long descriptorSetLayout = 0L;
+    private static long descriptorPool = 0L;
+    private static long descriptorSet = 0L;
+    private static long uniformBuffer = 0L;
+    private static long uniformMemory = 0L;
+    private static long uniformMapped = 0L;
     private static long pipeline = 0L;
     private static long vertexBuffer = 0L;
     private static long vertexMemory = 0L;
@@ -157,6 +163,96 @@ final class TrianglePipeline {
         vkUnmapMemory(device, vertexMemory);
     }
 
+    private static void createUniformBuffer(VkDevice device, VkPhysicalDevice physicalDevice, MemoryStack stack) {
+        long size = 64L;
+
+        VkBufferCreateInfo bufferInfo = VkBufferCreateInfo.calloc(stack)
+                .sType$Default()
+                .size(size)
+                .usage(VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT)
+                .sharingMode(VK_SHARING_MODE_EXCLUSIVE);
+
+        LongBuffer out = stack.mallocLong(1);
+        check(vkCreateBuffer(device, bufferInfo, null, out), "vkCreateBuffer(uniform)");
+        uniformBuffer = out.get(0);
+
+        VkMemoryRequirements req = VkMemoryRequirements.malloc(stack);
+        vkGetBufferMemoryRequirements(device, uniformBuffer, req);
+
+        VkPhysicalDeviceMemoryProperties props = VkPhysicalDeviceMemoryProperties.malloc(stack);
+        vkGetPhysicalDeviceMemoryProperties(physicalDevice, props);
+
+        int wanted = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+        int typeIndex = -1;
+        for (int i = 0; i < props.memoryTypeCount(); i++) {
+            if ((req.memoryTypeBits() & (1 << i)) != 0
+                    && (props.memoryTypes(i).propertyFlags() & wanted) == wanted) {
+                typeIndex = i;
+                break;
+            }
+        }
+        if (typeIndex < 0) {
+            throw new IllegalStateException("No host-visible memory type found for the uniform buffer.");
+        }
+
+        VkMemoryAllocateInfo allocInfo = VkMemoryAllocateInfo.calloc(stack)
+                .sType$Default()
+                .allocationSize(req.size())
+                .memoryTypeIndex(typeIndex);
+        check(vkAllocateMemory(device, allocInfo, null, out), "vkAllocateMemory(uniform)");
+        uniformMemory = out.get(0);
+        check(vkBindBufferMemory(device, uniformBuffer, uniformMemory, 0L), "vkBindBufferMemory(uniform)");
+
+        PointerBuffer data = stack.mallocPointer(1);
+        check(vkMapMemory(device, uniformMemory, 0L, size, 0, data), "vkMapMemory(uniform)");
+        uniformMapped = data.get(0);
+    }
+
+    private static void createDescriptors(VkDevice device, MemoryStack stack) {
+        VkDescriptorSetLayoutBinding.Buffer binding = VkDescriptorSetLayoutBinding.calloc(1, stack);
+        binding.get(0)
+                .binding(0)
+                .descriptorType(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER)
+                .descriptorCount(1)
+                .stageFlags(VK_SHADER_STAGE_VERTEX_BIT);
+
+        VkDescriptorSetLayoutCreateInfo layoutInfo = VkDescriptorSetLayoutCreateInfo.calloc(stack)
+                .sType$Default()
+                .pBindings(binding);
+        LongBuffer out = stack.mallocLong(1);
+        check(vkCreateDescriptorSetLayout(device, layoutInfo, null, out), "vkCreateDescriptorSetLayout");
+        descriptorSetLayout = out.get(0);
+
+        VkDescriptorPoolSize.Buffer poolSize = VkDescriptorPoolSize.calloc(1, stack);
+        poolSize.get(0).type(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER).descriptorCount(1);
+        VkDescriptorPoolCreateInfo poolInfo = VkDescriptorPoolCreateInfo.calloc(stack)
+                .sType$Default()
+                .pPoolSizes(poolSize)
+                .maxSets(1);
+        check(vkCreateDescriptorPool(device, poolInfo, null, out), "vkCreateDescriptorPool");
+        descriptorPool = out.get(0);
+
+        VkDescriptorSetAllocateInfo setInfo = VkDescriptorSetAllocateInfo.calloc(stack)
+                .sType$Default()
+                .descriptorPool(descriptorPool)
+                .pSetLayouts(stack.longs(descriptorSetLayout));
+        check(vkAllocateDescriptorSets(device, setInfo, out), "vkAllocateDescriptorSets");
+        descriptorSet = out.get(0);
+
+        VkDescriptorBufferInfo.Buffer bufferInfo = VkDescriptorBufferInfo.calloc(1, stack);
+        bufferInfo.get(0).buffer(uniformBuffer).offset(0L).range(64L);
+        VkWriteDescriptorSet.Buffer write = VkWriteDescriptorSet.calloc(1, stack);
+        write.get(0)
+                .sType$Default()
+                .dstSet(descriptorSet)
+                .dstBinding(0)
+                .dstArrayElement(0)
+                .descriptorType(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER)
+                .descriptorCount(1)
+                .pBufferInfo(bufferInfo);
+        vkUpdateDescriptorSets(device, write, null);
+    }
+
     private static void createIndexBuffer(VkDevice device, VkPhysicalDevice physicalDevice, MemoryStack stack) {
         long size = (long) INDICES.length * 2L;
 
@@ -213,6 +309,9 @@ final class TrianglePipeline {
             createVertexBuffer(device, physicalDevice, stack);
             createIndexBuffer(device, physicalDevice, stack);
             logger.info("[AetherVK] Index buffer created ({} indices).", INDICES.length);
+            createUniformBuffer(device, physicalDevice, stack);
+            createDescriptors(device, stack);
+            logger.info("[AetherVK] Uniform buffer and descriptor set created.");
             logger.info("[AetherVK] Vertex buffer created ({} vertices).", VERTICES.length / FLOATS_PER_VERTEX);
 
             long vert = createShaderModule(device, stack, "/assets/aethervk/shaders/triangle.vert.spv");
@@ -287,8 +386,8 @@ final class TrianglePipeline {
                             .logicOpEnable(false)
                             .pAttachments(blendAttachment);
 
-            VkPushConstantRange.Buffer pushRange = VkPushConstantRange.calloc(1, stack);
-            pushRange.get(0).stageFlags(VK_SHADER_STAGE_VERTEX_BIT).offset(0).size(64);
+            
+            
             VkPipelineDepthStencilStateCreateInfo depthState =
                     VkPipelineDepthStencilStateCreateInfo.calloc(stack)
                             .sType$Default()
@@ -303,7 +402,7 @@ final class TrianglePipeline {
                             .pDynamicStates(stack.ints(VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR));
 
             VkPipelineLayoutCreateInfo layoutInfo =
-                    VkPipelineLayoutCreateInfo.calloc(stack).sType$Default().pPushConstantRanges(pushRange);
+                    VkPipelineLayoutCreateInfo.calloc(stack).sType$Default().pSetLayouts(stack.longs(descriptorSetLayout));
             LongBuffer out = stack.mallocLong(1);
             check(vkCreatePipelineLayout(device, layoutInfo, null, out), "vkCreatePipelineLayout");
             pipelineLayout = out.get(0);
@@ -356,6 +455,27 @@ final class TrianglePipeline {
             org.lwjgl.vulkan.VK10.vkDestroyBuffer(device, vertexBuffer, null);
             vertexBuffer = 0L;
         }
+        if (descriptorPool != 0L) {
+            vkDestroyDescriptorPool(device, descriptorPool, null);
+            descriptorPool = 0L;
+            descriptorSet = 0L;
+        }
+        if (descriptorSetLayout != 0L) {
+            vkDestroyDescriptorSetLayout(device, descriptorSetLayout, null);
+            descriptorSetLayout = 0L;
+        }
+        if (uniformMemory != 0L) {
+            vkUnmapMemory(device, uniformMemory);
+            uniformMapped = 0L;
+        }
+        if (uniformBuffer != 0L) {
+            vkDestroyBuffer(device, uniformBuffer, null);
+            uniformBuffer = 0L;
+        }
+        if (uniformMemory != 0L) {
+            vkFreeMemory(device, uniformMemory, null);
+            uniformMemory = 0L;
+        }
         if (indexBuffer != 0L) {
             org.lwjgl.vulkan.VK10.vkDestroyBuffer(device, indexBuffer, null);
             indexBuffer = 0L;
@@ -396,9 +516,9 @@ final class TrianglePipeline {
                     .translate(0.0f, 0.0f, -2.5f)
                     .rotateY(angle)
                     .rotateX(angle * 0.5f);
-            ByteBuffer pushData = stack.malloc(64);
-            mvp.get(pushData);
-            vkCmdPushConstants(commandBuffer, pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, pushData);
+            ByteBuffer uniformData = MemoryUtil.memByteBuffer(uniformMapped, 64).order(ByteOrder.nativeOrder());
+            mvp.get(uniformData);
+            vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, stack.longs(descriptorSet), null);
             vkCmdBindIndexBuffer(commandBuffer, indexBuffer, 0L, VK_INDEX_TYPE_UINT16);
             vkCmdDrawIndexed(commandBuffer, INDEX_COUNT, 1, 0, 0, 0);
         }

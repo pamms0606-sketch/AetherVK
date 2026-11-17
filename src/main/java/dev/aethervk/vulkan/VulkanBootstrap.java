@@ -193,6 +193,12 @@ logger.info("[AetherVK] GLFW Vulkan surface extensions enabled.");
                 TrianglePipeline.create(logger, logicalDevice, physicalDevice, renderPass, swapchainWidth, swapchainHeight);
                 createCommandPoolAndBuffers(logger, stack);
                 renderAndPresentTestFrame(logger, stack);
+
+                refreshLogger = logger;
+                refreshCallback = org.lwjgl.glfw.GLFWWindowRefreshCallback.create(
+                        window -> drawFrame(refreshLogger));
+                GLFW.glfwSetWindowRefreshCallback(testWindow, refreshCallback);
+                logger.info("[AetherVK] Window refresh callback registered.");
             }
         } catch (Throwable error) {
             logger.error("[AetherVK] Vulkan bootstrap failed. Minecraft will continue using its normal renderer.", error);
@@ -1025,6 +1031,8 @@ dependency.get(0)
     private static long frameCounter = 0L;
     private static boolean drawFailed = false;
     private static boolean needRecreate = false;
+    private static Logger refreshLogger;
+    private static org.lwjgl.glfw.GLFWWindowRefreshCallback refreshCallback;
     private static int lastFbW = 0;
     private static int lastFbH = 0;
 

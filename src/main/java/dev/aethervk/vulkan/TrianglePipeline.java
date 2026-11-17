@@ -3,17 +3,31 @@ package dev.aethervk.vulkan;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 import java.nio.LongBuffer;
 
+import org.lwjgl.PointerBuffer;
 import org.lwjgl.system.MemoryStack;
+import org.lwjgl.system.MemoryUtil;
 import org.lwjgl.vulkan.*;
 import org.slf4j.Logger;
 
 import static org.lwjgl.vulkan.VK10.*;
 
 final class TrianglePipeline {
+    private static final int FLOATS_PER_VERTEX = 5;
+    private static final int STRIDE = FLOATS_PER_VERTEX * 4;
+
+    private static final float[] VERTICES = {
+             0.0f, -0.5f,  1.0f, 0.0f, 0.0f,
+             0.5f,  0.5f,  0.0f, 1.0f, 0.0f,
+            -0.5f,  0.5f,  0.0f, 0.0f, 1.0f
+    };
+
     private static long pipelineLayout = 0L;
     private static long pipeline = 0L;
+    private static long vertexBuffer = 0L;
+    private static long vertexMemory = 0L;
 
     private TrianglePipeline() {}
 
@@ -46,8 +60,59 @@ final class TrianglePipeline {
         return out.get(0);
     }
 
-    static void create(Logger logger, VkDevice device, long renderPass, int width, int height) {
+    private static void createVertexBuffer(VkDevice device, VkPhysicalDevice physicalDevice, MemoryStack stack) {
+        long size = (long) VERTICES.length * 4L;
+
+        VkBufferCreateInfo bufferInfo = VkBufferCreateInfo.calloc(stack)
+                .sType$Default()
+                .size(size)
+                .usage(VK_BUFFER_USAGE_VERTEX_BUFFER_BIT)
+                .sharingMode(VK_SHARING_MODE_EXCLUSIVE);
+
+        LongBuffer out = stack.mallocLong(1);
+        check(vkCreateBuffer(device, bufferInfo, null, out), "vkCreateBuffer(vertex)");
+        vertexBuffer = out.get(0);
+
+        VkMemoryRequirements req = VkMemoryRequirements.malloc(stack);
+        vkGetBufferMemoryRequirements(device, vertexBuffer, req);
+
+        VkPhysicalDeviceMemoryProperties props = VkPhysicalDeviceMemoryProperties.malloc(stack);
+        vkGetPhysicalDeviceMemoryProperties(physicalDevice, props);
+
+        int wanted = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+        int typeIndex = -1;
+        for (int i = 0; i < props.memoryTypeCount(); i++) {
+            if ((req.memoryTypeBits() & (1 << i)) != 0
+                    && (props.memoryTypes(i).propertyFlags() & wanted) == wanted) {
+                typeIndex = i;
+                break;
+            }
+        }
+        if (typeIndex < 0) {
+            throw new IllegalStateException("No host-visible memory type found for the vertex buffer.");
+        }
+
+        VkMemoryAllocateInfo allocInfo = VkMemoryAllocateInfo.calloc(stack)
+                .sType$Default()
+                .allocationSize(req.size())
+                .memoryTypeIndex(typeIndex);
+        check(vkAllocateMemory(device, allocInfo, null, out), "vkAllocateMemory(vertex)");
+        vertexMemory = out.get(0);
+        check(vkBindBufferMemory(device, vertexBuffer, vertexMemory, 0L), "vkBindBufferMemory(vertex)");
+
+        PointerBuffer data = stack.mallocPointer(1);
+        check(vkMapMemory(device, vertexMemory, 0L, size, 0, data), "vkMapMemory(vertex)");
+        ByteBuffer bytes = MemoryUtil.memByteBuffer(data.get(0), (int) size).order(ByteOrder.nativeOrder());
+        bytes.asFloatBuffer().put(VERTICES);
+        vkUnmapMemory(device, vertexMemory);
+    }
+
+    static void create(Logger logger, VkDevice device, VkPhysicalDevice physicalDevice,
+                       long renderPass, int width, int height) {
         try (MemoryStack stack = MemoryStack.stackPush()) {
+            createVertexBuffer(device, physicalDevice, stack);
+            logger.info("[AetherVK] Vertex buffer created ({} vertices).", VERTICES.length / FLOATS_PER_VERTEX);
+
             long vert = createShaderModule(device, stack, "/assets/aethervk/shaders/triangle.vert.spv");
             long frag = createShaderModule(device, stack, "/assets/aethervk/shaders/triangle.frag.spv");
 
@@ -57,8 +122,18 @@ final class TrianglePipeline {
             stages.get(1).sType$Default()
                     .stage(VK_SHADER_STAGE_FRAGMENT_BIT).module(frag).pName(stack.UTF8("main"));
 
+            VkVertexInputBindingDescription.Buffer bindings = VkVertexInputBindingDescription.calloc(1, stack);
+            bindings.get(0).binding(0).stride(STRIDE).inputRate(VK_VERTEX_INPUT_RATE_VERTEX);
+
+            VkVertexInputAttributeDescription.Buffer attributes = VkVertexInputAttributeDescription.calloc(2, stack);
+            attributes.get(0).binding(0).location(0).format(VK_FORMAT_R32G32_SFLOAT).offset(0);
+            attributes.get(1).binding(0).location(1).format(VK_FORMAT_R32G32B32_SFLOAT).offset(8);
+
             VkPipelineVertexInputStateCreateInfo vertexInput =
-                    VkPipelineVertexInputStateCreateInfo.calloc(stack).sType$Default();
+                    VkPipelineVertexInputStateCreateInfo.calloc(stack)
+                            .sType$Default()
+                            .pVertexBindingDescriptions(bindings)
+                            .pVertexAttributeDescriptions(attributes);
 
             VkPipelineInputAssemblyStateCreateInfo inputAssembly =
                     VkPipelineInputAssemblyStateCreateInfo.calloc(stack)
@@ -108,7 +183,6 @@ final class TrianglePipeline {
                     VkPipelineColorBlendStateCreateInfo.calloc(stack)
                             .sType$Default()
                             .logicOpEnable(false)
-                            .attachmentCount(1)
                             .pAttachments(blendAttachment);
 
             VkPipelineLayoutCreateInfo layoutInfo =
@@ -120,7 +194,6 @@ final class TrianglePipeline {
             VkGraphicsPipelineCreateInfo.Buffer pipelineInfo = VkGraphicsPipelineCreateInfo.calloc(1, stack);
             pipelineInfo.get(0)
                     .sType$Default()
-                    .stageCount(2)
                     .pStages(stages)
                     .pVertexInputState(vertexInput)
                     .pInputAssemblyState(inputAssembly)
@@ -145,10 +218,13 @@ final class TrianglePipeline {
     }
 
     static void record(VkCommandBuffer commandBuffer) {
-        if (pipeline == 0L) {
+        if (pipeline == 0L || vertexBuffer == 0L) {
             return;
         }
-        vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
-        vkCmdDraw(commandBuffer, 3, 1, 0, 0);
+        try (MemoryStack stack = MemoryStack.stackPush()) {
+            vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
+            vkCmdBindVertexBuffers(commandBuffer, 0, stack.longs(vertexBuffer), stack.longs(0L));
+            vkCmdDraw(commandBuffer, 3, 1, 0, 0);
+        }
     }
 }

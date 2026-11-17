@@ -30,6 +30,8 @@ final class TrianglePipeline {
     private static long vertexMemory = 0L;
 
     private static float aspect = 1f;
+    private static int extentW = 1;
+    private static int extentH = 1;
     private TrianglePipeline() {}
 
     private static void check(int result, String what) {
@@ -111,6 +113,8 @@ final class TrianglePipeline {
     static void create(Logger logger, VkDevice device, VkPhysicalDevice physicalDevice,
                        long renderPass, int width, int height) {
         try (MemoryStack stack = MemoryStack.stackPush()) {
+            extentW = width;
+            extentH = height;
             aspect = (float) width / (float) height;
             createVertexBuffer(device, physicalDevice, stack);
             logger.info("[AetherVK] Vertex buffer created ({} vertices).", VERTICES.length / FLOATS_PER_VERTEX);
@@ -189,6 +193,11 @@ final class TrianglePipeline {
 
             VkPushConstantRange.Buffer pushRange = VkPushConstantRange.calloc(1, stack);
             pushRange.get(0).stageFlags(VK_SHADER_STAGE_VERTEX_BIT).offset(0).size(8);
+            org.lwjgl.vulkan.VkPipelineDynamicStateCreateInfo dynamicState =
+                    org.lwjgl.vulkan.VkPipelineDynamicStateCreateInfo.calloc(stack)
+                            .sType(VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO)
+                            .pDynamicStates(stack.ints(VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR));
+
             VkPipelineLayoutCreateInfo layoutInfo =
                     VkPipelineLayoutCreateInfo.calloc(stack).sType$Default().pPushConstantRanges(pushRange);
             LongBuffer out = stack.mallocLong(1);
@@ -205,6 +214,7 @@ final class TrianglePipeline {
                     .pRasterizationState(raster)
                     .pMultisampleState(multisample)
                     .pColorBlendState(colorBlend)
+                    .pDynamicState(dynamicState)
                     .layout(pipelineLayout)
                     .renderPass(renderPass)
                     .subpass(0)
@@ -225,12 +235,25 @@ final class TrianglePipeline {
         record(commandBuffer, 0.0f);
     }
 
+    static void setExtent(int w, int h) {
+        extentW = w;
+        extentH = h;
+        aspect = (float) w / (float) h;
+    }
+
     static void record(VkCommandBuffer commandBuffer, float angle) {
         if (pipeline == 0L || vertexBuffer == 0L) {
             return;
         }
         try (MemoryStack stack = MemoryStack.stackPush()) {
             vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
+            VkViewport.Buffer vp = VkViewport.calloc(1, stack);
+            vp.get(0).x(0f).y(0f).width((float) extentW).height((float) extentH).minDepth(0f).maxDepth(1f);
+            vkCmdSetViewport(commandBuffer, 0, vp);
+            VkRect2D.Buffer sc = VkRect2D.calloc(1, stack);
+            sc.get(0).offset().set(0, 0);
+            sc.get(0).extent().set(extentW, extentH);
+            vkCmdSetScissor(commandBuffer, 0, sc);
             vkCmdBindVertexBuffers(commandBuffer, 0, stack.longs(vertexBuffer), stack.longs(0L));
             vkCmdPushConstants(commandBuffer, pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, stack.floats(angle, aspect));
             vkCmdDraw(commandBuffer, 3, 1, 0, 0);

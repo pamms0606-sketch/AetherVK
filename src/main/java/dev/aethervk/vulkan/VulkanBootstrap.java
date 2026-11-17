@@ -190,6 +190,7 @@ logger.info("[AetherVK] GLFW Vulkan surface extensions enabled.");
                 createSwapchain(logger, stack);
                 createImageViews(logger, stack);
                 createRenderPassAndFramebuffers(logger, stack);
+                TrianglePipeline.create(logger, logicalDevice, renderPass, swapchainWidth, swapchainHeight);
                 createCommandPoolAndBuffers(logger, stack);
                 renderAndPresentTestFrame(logger, stack);
             }
@@ -761,6 +762,7 @@ dependency.get(0)
                 renderBeginInfo,
                 VK_SUBPASS_CONTENTS_INLINE
         );
+        TrianglePipeline.record(commandBuffer);
         vkCmdEndRenderPass(commandBuffer);
         checkVk(
                 vkEndCommandBuffer(commandBuffer),

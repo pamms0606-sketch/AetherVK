@@ -2,7 +2,7 @@
 
 Experimental client-side Vulkan backend prototype for **Minecraft 1.21.1 + NeoForge**.
 
-> This is a development milestone, not a finished shader mod. It does **not** replace Minecraft's OpenGL renderer and does not draw the world. Minecraft keeps rendering through its normal path. AetherVK currently opens a separate GLFW Vulkan test window, clears it to a pulsing red and draws a colored triangle every frame. It does not parse Iris shader packs or run Bliss/BSL/Complementary yet. If Vulkan initialization fails, Minecraft keeps its normal renderer.
+> This is a development milestone, not a finished shader mod. It does **not** replace Minecraft's OpenGL renderer and does not draw the world. Minecraft keeps rendering through its normal path. AetherVK currently opens a separate GLFW Vulkan test window, clears it to a pulsing red and draws a rotating colored triangle every frame. It does not parse Iris shader packs or run Bliss/BSL/Complementary yet. If Vulkan initialization fails, Minecraft keeps its normal renderer.
 
 ## Current milestone
 
@@ -15,10 +15,12 @@ Standalone Vulkan prototype, running in a separate test window next to Minecraft
 - Vulkan instance creation, portability-enumeration support, physical-device enumeration, graphics queue-family selection and logical-device creation.
 - Vulkan surface for a separate GLFW window (`GLFW_NO_API`) and a swapchain.
 - Swapchain image views, render pass, framebuffers, command pool and command buffers, semaphores and a fence.
-- A frame loop driven by Minecraft's `RenderFrameEvent.Post` (capped at about 60 frames per second) that clears the swapchain image to a red that pulses between black and red, draws a colored triangle with a graphics pipeline and GLSL shaders (compiled to SPIR-V), and presents it.
+- A frame loop driven by Minecraft's `RenderFrameEvent.Post` (capped at about 60 frames per second) that clears the swapchain image to a red that pulses between black and red, draws a colored triangle that rotates once every six seconds, and presents it. The triangle uses a vertex buffer, a graphics pipeline with dynamic viewport and scissor, a push constant for the rotation angle and aspect-ratio correction, and GLSL shaders (compiled to SPIR-V).
+- Swapchain recreation when the window is resized (the triangle keeps its proportions).
+- Vulkan resources are freed when the game shuts down (`GameShuttingDownEvent`).
 - Graceful failure logging and cleanup.
 
-Not done yet: swapchain recreation on resize (the frame loop stops if the swapchain becomes invalid), freeing Vulkan objects on shutdown, and any integration with Minecraft's own rendering.
+Not done yet: any integration with Minecraft's own rendering. Known limitation: on macOS the test window freezes while you drag its edge to resize it, and it redraws when you let go.
 
 ## Tested on
 
@@ -58,7 +60,7 @@ If you use IntelliJ IDEA, open this directory as a Gradle project and let it imp
 gradle runClient
 ```
 
-Use a clean NeoForge 1.21.1 profile for initial testing. Read `latest.log` and search for `[AetherVK]`. A separate window titled "AetherVK Vulkan Test" should appear next to the Minecraft window, with a red background that pulses between black and red, and a colored triangle.
+Use a clean NeoForge 1.21.1 profile for initial testing. Read `latest.log` and search for `[AetherVK]`. A separate window titled "AetherVK Vulkan Test" should appear next to the Minecraft window, with a red background that pulses between black and red, and a rotating colored triangle.
 
 ## Shaders
 
@@ -77,8 +79,8 @@ Do not copy random Vulkan `.dylib` files into the Minecraft installation. Use th
 ## Roadmap
 
 1. **0.1 — Vulkan bootstrap:** instance + physical/logical device. Done.
-2. **0.2 to 0.9 — Standalone presentation test:** surface, swapchain, image views, command buffers, synchronization, render pass, framebuffers, a clear-and-present test and a first triangle (graphics pipeline and GLSL shaders) in a separate window. Done.
-3. **Next — Render bridge prototype:** prove a small Vulkan pass can coexist with Minecraft's lifecycle, then design a controlled replacement path for the world renderer. This includes swapchain recreation on resize and integration with Minecraft's window.
+2. **0.2 to 0.9 — Standalone presentation test:** surface, swapchain, image views, command buffers, synchronization, render pass, framebuffers, a clear-and-present test, a first triangle (vertex buffer, graphics pipeline, GLSL shaders), rotation through a push constant, swapchain recreation on resize and a clean shutdown, all in a separate window. Done.
+3. **Next — Render bridge prototype:** prove a small Vulkan pass can coexist with Minecraft's lifecycle, then design a controlled replacement path for the world renderer. This includes integration with Minecraft's window.
 4. **Shader-pack reader:** safely inspect ZIP packs, parse `shaders.properties`, discover programs and options.
 5. **Iris compatibility layer:** implement program/pass scheduling, uniforms, samplers, image formats, shadow passes and G-buffer semantics.
 6. **Shader coverage:** test simple packs first, then progressively test BSL, Complementary and Bliss. Compatibility will be feature-by-feature, not guaranteed for every pack.

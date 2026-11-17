@@ -1027,7 +1027,7 @@ dependency.get(0)
                             .pClearValues(clearValues);
 
             vkCmdBeginRenderPass(cb, renderBeginInfo, VK_SUBPASS_CONTENTS_INLINE);
-            TrianglePipeline.record(cb);
+            TrianglePipeline.record(cb, (float) ((System.nanoTime() % 6_000_000_000L) / 6_000_000_000.0 * 2.0 * Math.PI));
             vkCmdEndRenderPass(cb);
             checkVk(vkEndCommandBuffer(cb), "vkEndCommandBuffer(frame)");
 

@@ -185,8 +185,10 @@ final class TrianglePipeline {
                             .logicOpEnable(false)
                             .pAttachments(blendAttachment);
 
+            VkPushConstantRange.Buffer pushRange = VkPushConstantRange.calloc(1, stack);
+            pushRange.get(0).stageFlags(VK_SHADER_STAGE_VERTEX_BIT).offset(0).size(4);
             VkPipelineLayoutCreateInfo layoutInfo =
-                    VkPipelineLayoutCreateInfo.calloc(stack).sType$Default();
+                    VkPipelineLayoutCreateInfo.calloc(stack).sType$Default().pPushConstantRanges(pushRange);
             LongBuffer out = stack.mallocLong(1);
             check(vkCreatePipelineLayout(device, layoutInfo, null, out), "vkCreatePipelineLayout");
             pipelineLayout = out.get(0);
@@ -218,12 +220,17 @@ final class TrianglePipeline {
     }
 
     static void record(VkCommandBuffer commandBuffer) {
+        record(commandBuffer, 0.0f);
+    }
+
+    static void record(VkCommandBuffer commandBuffer, float angle) {
         if (pipeline == 0L || vertexBuffer == 0L) {
             return;
         }
         try (MemoryStack stack = MemoryStack.stackPush()) {
             vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
             vkCmdBindVertexBuffers(commandBuffer, 0, stack.longs(vertexBuffer), stack.longs(0L));
+            vkCmdPushConstants(commandBuffer, pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, stack.floats(angle));
             vkCmdDraw(commandBuffer, 3, 1, 0, 0);
         }
     }

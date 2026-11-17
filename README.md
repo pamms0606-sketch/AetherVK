@@ -2,7 +2,7 @@
 
 Experimental client-side Vulkan backend prototype for **Minecraft 1.21.1 + NeoForge**.
 
-> This is a development milestone, not a finished shader mod. It does **not** replace Minecraft's OpenGL renderer and does not draw the world. Minecraft keeps rendering through its normal path. AetherVK currently opens a separate GLFW Vulkan test window and clears it to a solid color. It does not parse Iris shader packs or run Bliss/BSL/Complementary yet. If Vulkan initialization fails, Minecraft keeps its normal renderer.
+> This is a development milestone, not a finished shader mod. It does **not** replace Minecraft's OpenGL renderer and does not draw the world. Minecraft keeps rendering through its normal path. AetherVK currently opens a separate GLFW Vulkan test window, clears it to a solid color and draws a single triangle. It does not parse Iris shader packs or run Bliss/BSL/Complementary yet. If Vulkan initialization fails, Minecraft keeps its normal renderer.
 
 ## Current milestone
 
@@ -15,10 +15,10 @@ Standalone Vulkan prototype, running in a separate test window next to Minecraft
 - Vulkan instance creation, portability-enumeration support, physical-device enumeration, graphics queue-family selection and logical-device creation.
 - Vulkan surface for a separate GLFW window (`GLFW_NO_API`) and a swapchain.
 - Swapchain image views, render pass, framebuffers, command pool and command buffers, semaphores and a fence.
-- One frame that clears the swapchain image to solid red and presents it. The window should show solid red.
+- One frame that clears the swapchain image to solid red, draws a colored triangle with a graphics pipeline and GLSL shaders (compiled to SPIR-V), and presents it.
 - Graceful failure logging and cleanup.
 
-Not done yet: a graphics pipeline, drawing geometry, swapchain recreation on resize, and any integration with Minecraft's own rendering.
+Not done yet: vertex buffers, a continuous render loop, swapchain recreation on resize, freeing Vulkan objects on shutdown, and any integration with Minecraft's own rendering.
 
 ## Tested on
 
@@ -58,7 +58,11 @@ If you use IntelliJ IDEA, open this directory as a Gradle project and let it imp
 gradle runClient
 ```
 
-Use a clean NeoForge 1.21.1 profile for initial testing. Read `latest.log` and search for `[AetherVK]`. A separate window titled "AetherVK Vulkan Test" should appear next to the Minecraft window and show solid red.
+Use a clean NeoForge 1.21.1 profile for initial testing. Read `latest.log` and search for `[AetherVK]`. A separate window titled "AetherVK Vulkan Test" should appear next to the Minecraft window, with a red background and a colored triangle.
+
+## Shaders
+
+The triangle shaders live in `src/main/resources/assets/aethervk/shaders/`. The compiled `.spv` files are committed. To rebuild them after editing the GLSL, install the Vulkan SDK and run `glslc triangle.vert -o triangle.vert.spv` (and the same for `triangle.frag`).
 
 ## macOS SDK configuration
 
@@ -73,8 +77,8 @@ Do not copy random Vulkan `.dylib` files into the Minecraft installation. Use th
 ## Roadmap
 
 1. **0.1 — Vulkan bootstrap:** instance + physical/logical device. Done.
-2. **0.2 to 0.8 — Standalone presentation test:** surface, swapchain, image views, command buffers, synchronization, render pass, framebuffers and a clear-and-present test in a separate window. Done.
-3. **Next — Render bridge prototype:** prove a small Vulkan pass can coexist with Minecraft's lifecycle, then design a controlled replacement path for the world renderer. This includes a graphics pipeline, swapchain recreation on resize and integration with Minecraft's window.
+2. **0.2 to 0.9 — Standalone presentation test:** surface, swapchain, image views, command buffers, synchronization, render pass, framebuffers, a clear-and-present test and a first triangle (graphics pipeline and GLSL shaders) in a separate window. Done.
+3. **Next — Render bridge prototype:** prove a small Vulkan pass can coexist with Minecraft's lifecycle, then design a controlled replacement path for the world renderer. This includes vertex buffers, swapchain recreation on resize and integration with Minecraft's window.
 4. **Shader-pack reader:** safely inspect ZIP packs, parse `shaders.properties`, discover programs and options.
 5. **Iris compatibility layer:** implement program/pass scheduling, uniforms, samplers, image formats, shadow passes and G-buffer semantics.
 6. **Shader coverage:** test simple packs first, then progressively test BSL, Complementary and Bliss. Compatibility will be feature-by-feature, not guaranteed for every pack.

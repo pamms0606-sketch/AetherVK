@@ -961,5 +961,119 @@ dependency.get(0)
         }
     }
 
+    private static long frameCounter = 0L;
+    private static boolean drawFailed = false;
+
+    public static void drawFrame(Logger logger) {
+        if (drawFailed || logicalDevice == null || graphicsQueue == null || swapchain == 0L
+                || renderPass == 0L || commandBuffers.length == 0 || renderFence == 0L
+                || imageAvailableSemaphore == 0L || renderFinishedSemaphore == 0L) {
+            return;
+        }
+
+        try (MemoryStack stack = MemoryStack.stackPush()) {
+            IntBuffer imageIndex = stack.mallocInt(1);
+            int acquire = org.lwjgl.vulkan.KHRSwapchain.vkAcquireNextImageKHR(
+                    logicalDevice, swapchain, 20_000_000L,
+                    imageAvailableSemaphore, 0L, imageIndex);
+
+            if (acquire == VK_TIMEOUT || acquire == VK_NOT_READY) {
+                return;
+            }
+            if (acquire != VK_SUCCESS
+                    && acquire != org.lwjgl.vulkan.KHRSwapchain.VK_SUBOPTIMAL_KHR) {
+                logger.warn("[AetherVK] drawFrame stopped: vkAcquireNextImageKHR returned {} (swapchain recreation is not implemented yet).", acquire);
+                drawFailed = true;
+                return;
+            }
+
+            int index = imageIndex.get(0);
+            if (index < 0 || index >= commandBuffers.length || index >= framebuffers.length) {
+                logger.warn("[AetherVK] drawFrame stopped: invalid image index {}.", index);
+                drawFailed = true;
+                return;
+            }
+
+            VkCommandBuffer cb = commandBuffers[index];
+            checkVk(vkResetCommandBuffer(cb, 0), "vkResetCommandBuffer(frame)");
+
+            VkCommandBufferBeginInfo beginInfo =
+                    VkCommandBufferBeginInfo.calloc(stack).sType$Default();
+            checkVk(vkBeginCommandBuffer(cb, beginInfo), "vkBeginCommandBuffer(frame)");
+
+            double phase = (System.nanoTime() % 2_000_000_000L) / 2_000_000_000.0;
+            float red = 0.5f + 0.5f * (float) Math.sin(phase * 2.0 * Math.PI);
+
+            org.lwjgl.vulkan.VkClearValue.Buffer clearValues =
+                    org.lwjgl.vulkan.VkClearValue.calloc(1, stack);
+            clearValues.get(0).color()
+                    .float32(0, red)
+                    .float32(1, 0.0f)
+                    .float32(2, 0.0f)
+                    .float32(3, 1.0f);
+
+            org.lwjgl.vulkan.VkRect2D renderArea =
+                    org.lwjgl.vulkan.VkRect2D.calloc(stack)
+                            .offset(org.lwjgl.vulkan.VkOffset2D.calloc(stack).set(0, 0))
+                            .extent(org.lwjgl.vulkan.VkExtent2D.calloc(stack)
+                                    .set(swapchainWidth, swapchainHeight));
+
+            org.lwjgl.vulkan.VkRenderPassBeginInfo renderBeginInfo =
+                    org.lwjgl.vulkan.VkRenderPassBeginInfo.calloc(stack)
+                            .sType$Default()
+                            .renderPass(renderPass)
+                            .framebuffer(framebuffers[index])
+                            .renderArea(renderArea)
+                            .pClearValues(clearValues);
+
+            vkCmdBeginRenderPass(cb, renderBeginInfo, VK_SUBPASS_CONTENTS_INLINE);
+            TrianglePipeline.record(cb);
+            vkCmdEndRenderPass(cb);
+            checkVk(vkEndCommandBuffer(cb), "vkEndCommandBuffer(frame)");
+
+            PointerBuffer cbs = stack.mallocPointer(1);
+            cbs.put(cb.address()).flip();
+
+            VkSubmitInfo submit = VkSubmitInfo.calloc(stack)
+                    .sType$Default()
+                    .waitSemaphoreCount(1)
+                    .pWaitSemaphores(stack.longs(imageAvailableSemaphore))
+                    .pWaitDstStageMask(stack.ints(VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT))
+                    .pCommandBuffers(cbs)
+                    .pSignalSemaphores(stack.longs(renderFinishedSemaphore));
+
+            checkVk(vkResetFences(logicalDevice, stack.longs(renderFence)), "vkResetFences(frame)");
+            checkVk(vkQueueSubmit(graphicsQueue, submit, renderFence), "vkQueueSubmit(frame)");
+
+            org.lwjgl.vulkan.VkPresentInfoKHR present =
+                    org.lwjgl.vulkan.VkPresentInfoKHR.calloc(stack)
+                            .sType$Default()
+                            .pWaitSemaphores(stack.longs(renderFinishedSemaphore))
+                            .swapchainCount(1)
+                            .pSwapchains(stack.longs(swapchain))
+                            .pImageIndices(stack.ints(index));
+
+            int presentResult =
+                    org.lwjgl.vulkan.KHRSwapchain.vkQueuePresentKHR(graphicsQueue, present);
+            if (presentResult != VK_SUCCESS
+                    && presentResult != org.lwjgl.vulkan.KHRSwapchain.VK_SUBOPTIMAL_KHR) {
+                logger.warn("[AetherVK] drawFrame stopped: vkQueuePresentKHR returned {}.", presentResult);
+                drawFailed = true;
+                return;
+            }
+
+            checkVk(vkQueueWaitIdle(graphicsQueue), "vkQueueWaitIdle(frame)");
+
+            frameCounter++;
+            if (frameCounter == 1 || frameCounter % 100 == 0) {
+                logger.info("[AetherVK] Frame {} drawn.", frameCounter);
+            }
+        } catch (Throwable error) {
+            logger.warn("[AetherVK] drawFrame stopped after an error.", error);
+            drawFailed = true;
+        }
+    }
+
+
     private record DeviceCandidate(VkPhysicalDevice device, String name, int graphicsQueueFamily) {}
 }

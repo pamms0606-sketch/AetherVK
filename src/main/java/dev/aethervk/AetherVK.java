@@ -24,6 +24,7 @@ public final class AetherVK {
 
     private void onClientTick(ClientTickEvent.Post event) {
         if (initialized) {
+            VulkanBootstrap.drawFrame(LOGGER);
             return;
         }
 

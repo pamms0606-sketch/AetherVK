@@ -189,6 +189,7 @@ logger.info("[AetherVK] GLFW Vulkan surface extensions enabled.");
                 createLogicalDevice(logger, stack);
                 createSwapchain(logger, stack);
                 createImageViews(logger, stack);
+                DepthBuffer.create(logicalDevice, physicalDevice, swapchainWidth, swapchainHeight);
                 createRenderPassAndFramebuffers(logger, stack);
                 TrianglePipeline.create(logger, logicalDevice, physicalDevice, renderPass, swapchainWidth, swapchainHeight);
                 createCommandPoolAndBuffers(logger, stack);
@@ -542,7 +543,7 @@ logger.info("[AetherVK] DEBUG selected color space={}", selectedFormat.colorSpac
         }
 
         VkAttachmentDescription.Buffer colorAttachment =
-                VkAttachmentDescription.calloc(1, stack);
+                VkAttachmentDescription.calloc(2, stack);
 
         colorAttachment.get(0)
                 .format(swapchainFormat)
@@ -553,6 +554,20 @@ logger.info("[AetherVK] DEBUG selected color space={}", selectedFormat.colorSpac
                 .stencilStoreOp(VK_ATTACHMENT_STORE_OP_DONT_CARE)
                 .initialLayout(VK_IMAGE_LAYOUT_UNDEFINED)
                 .finalLayout(org.lwjgl.vulkan.KHRSwapchain.VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
+
+        colorAttachment.get(1)
+                .format(DepthBuffer.FORMAT)
+                .samples(VK_SAMPLE_COUNT_1_BIT)
+                .loadOp(VK_ATTACHMENT_LOAD_OP_CLEAR)
+                .storeOp(VK_ATTACHMENT_STORE_OP_DONT_CARE)
+                .stencilLoadOp(VK_ATTACHMENT_LOAD_OP_DONT_CARE)
+                .stencilStoreOp(VK_ATTACHMENT_STORE_OP_DONT_CARE)
+                .initialLayout(VK_IMAGE_LAYOUT_UNDEFINED)
+                .finalLayout(VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL);
+
+        VkAttachmentReference depthReference = VkAttachmentReference.calloc(stack)
+                .attachment(1)
+                .layout(VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL);
 
         VkAttachmentReference.Buffer colorReference =
                 VkAttachmentReference.calloc(1, stack);
@@ -567,16 +582,17 @@ logger.info("[AetherVK] DEBUG selected color space={}", selectedFormat.colorSpac
         subpasses.get(0)
                 .pipelineBindPoint(VK_PIPELINE_BIND_POINT_GRAPHICS)
                 .colorAttachmentCount(1)
-                .pColorAttachments(colorReference);
+                .pColorAttachments(colorReference)
+                .pDepthStencilAttachment(depthReference);
         org.lwjgl.vulkan.VkSubpassDependency.Buffer dependency =
         org.lwjgl.vulkan.VkSubpassDependency.calloc(1, stack);
 dependency.get(0)
         .srcSubpass(VK_SUBPASS_EXTERNAL)
         .dstSubpass(0)
-        .srcStageMask(VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT)
+        .srcStageMask(VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT)
         .srcAccessMask(0)
-        .dstStageMask(VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT)
-        .dstAccessMask(VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT);
+        .dstStageMask(VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT)
+        .dstAccessMask(VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT);
         VkRenderPassCreateInfo renderPassInfo =
                 VkRenderPassCreateInfo.calloc(stack)
                         .sType$Default()
@@ -599,7 +615,7 @@ dependency.get(0)
                     VkFramebufferCreateInfo.calloc(stack)
                             .sType$Default()
                             .renderPass(renderPass)
-                            .pAttachments(stack.longs(imageViews[i]))
+                            .pAttachments(stack.longs(imageViews[i], DepthBuffer.view()))
                             .width(swapchainWidth)
                             .height(swapchainHeight)
                             .layers(1);
@@ -738,7 +754,7 @@ dependency.get(0)
         );
 
         org.lwjgl.vulkan.VkClearValue.Buffer clearValues =
-                org.lwjgl.vulkan.VkClearValue.calloc(1, stack);
+                org.lwjgl.vulkan.VkClearValue.calloc(2, stack);
 
         clearValues.get(0).color()
                 .float32(0, 1.0f)
@@ -755,6 +771,7 @@ dependency.get(0)
                         .extent(org.lwjgl.vulkan.VkExtent2D.calloc(stack)
                                 .set(swapchainWidth, swapchainHeight));
 
+        clearValues.get(1).depthStencil().set(1.0f, 0);
         org.lwjgl.vulkan.VkRenderPassBeginInfo renderBeginInfo =
                 org.lwjgl.vulkan.VkRenderPassBeginInfo.calloc(stack)
                         .sType$Default()
@@ -928,6 +945,9 @@ dependency.get(0)
             createSwapchain(logger, stack);
             createImageViews(logger, stack);
 
+            DepthBuffer.destroy(logicalDevice);
+            DepthBuffer.create(logicalDevice, physicalDevice, swapchainWidth, swapchainHeight);
+
             if (swapchainImages.length > commandBuffers.length) {
                 throw new IllegalStateException("Swapchain has more images than command buffers.");
             }
@@ -938,7 +958,7 @@ dependency.get(0)
                         VkFramebufferCreateInfo.calloc(stack)
                                 .sType$Default()
                                 .renderPass(renderPass)
-                                .pAttachments(stack.longs(imageViews[i]))
+                                .pAttachments(stack.longs(imageViews[i], DepthBuffer.view()))
                                 .width(swapchainWidth)
                                 .height(swapchainHeight)
                                 .layers(1);
@@ -996,6 +1016,8 @@ dependency.get(0)
                     }
                 }
                 framebuffers = new long[0];
+
+                DepthBuffer.destroy(logicalDevice);
 
                 if (renderPass != 0L) {
                     vkDestroyRenderPass(logicalDevice, renderPass, null);
@@ -1119,7 +1141,7 @@ dependency.get(0)
             float red = 0.5f + 0.5f * (float) Math.sin(phase * 2.0 * Math.PI);
 
             org.lwjgl.vulkan.VkClearValue.Buffer clearValues =
-                    org.lwjgl.vulkan.VkClearValue.calloc(1, stack);
+                    org.lwjgl.vulkan.VkClearValue.calloc(2, stack);
             clearValues.get(0).color()
                     .float32(0, red)
                     .float32(1, 0.0f)
@@ -1132,7 +1154,8 @@ dependency.get(0)
                             .extent(org.lwjgl.vulkan.VkExtent2D.calloc(stack)
                                     .set(swapchainWidth, swapchainHeight));
 
-            org.lwjgl.vulkan.VkRenderPassBeginInfo renderBeginInfo =
+            clearValues.get(1).depthStencil().set(1.0f, 0);
+        org.lwjgl.vulkan.VkRenderPassBeginInfo renderBeginInfo =
                     org.lwjgl.vulkan.VkRenderPassBeginInfo.calloc(stack)
                             .sType$Default()
                             .renderPass(renderPass)

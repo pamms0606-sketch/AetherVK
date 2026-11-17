@@ -220,6 +220,14 @@ final class TrianglePipeline {
 
             VkPushConstantRange.Buffer pushRange = VkPushConstantRange.calloc(1, stack);
             pushRange.get(0).stageFlags(VK_SHADER_STAGE_VERTEX_BIT).offset(0).size(64);
+            VkPipelineDepthStencilStateCreateInfo depthState =
+                    VkPipelineDepthStencilStateCreateInfo.calloc(stack)
+                            .sType$Default()
+                            .depthTestEnable(true)
+                            .depthWriteEnable(true)
+                            .depthCompareOp(VK_COMPARE_OP_LESS)
+                            .depthBoundsTestEnable(false)
+                            .stencilTestEnable(false);
             org.lwjgl.vulkan.VkPipelineDynamicStateCreateInfo dynamicState =
                     org.lwjgl.vulkan.VkPipelineDynamicStateCreateInfo.calloc(stack)
                             .sType(VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO)
@@ -241,6 +249,7 @@ final class TrianglePipeline {
                     .pRasterizationState(raster)
                     .pMultisampleState(multisample)
                     .pColorBlendState(colorBlend)
+                    .pDepthStencilState(depthState)
                     .pDynamicState(dynamicState)
                     .layout(pipelineLayout)
                     .renderPass(renderPass)

@@ -15,7 +15,7 @@ import org.slf4j.Logger;
 import static org.lwjgl.vulkan.VK10.*;
 
 final class TrianglePipeline {
-    private static final int FLOATS_PER_VERTEX = 6;
+    private static final int FLOATS_PER_VERTEX = 8;
     private static final int STRIDE = FLOATS_PER_VERTEX * 4;
 
     private static final float[] VERTICES = buildCube();
@@ -30,12 +30,9 @@ final class TrianglePipeline {
             {{-h,  h,  h}, { h,  h,  h}, { h,  h, -h}, {-h,  h, -h}},
             {{ h, -h,  h}, {-h, -h,  h}, {-h, -h, -h}, { h, -h, -h}}
         };
-        float[][] colors = {
-            {1f, 0f, 0f}, {0f, 1f, 1f}, {0f, 1f, 0f},
-            {1f, 0f, 1f}, {0f, 0f, 1f}, {1f, 1f, 0f}
-        };
-        int[] order = {0, 1, 2, 0, 2, 3};
-        float[] v = new float[24 * 6];
+        float[] shade = {0.8f, 0.8f, 0.6f, 0.6f, 1.0f, 0.5f};
+        float[][] uvs = {{0f, 1f}, {1f, 1f}, {1f, 0f}, {0f, 0f}};
+        float[] v = new float[24 * 8];
         int n = 0;
         for (int face = 0; face < 6; face++) {
             for (int k = 0; k < 4; k++) {
@@ -43,9 +40,11 @@ final class TrianglePipeline {
                 v[n++] = c[0];
                 v[n++] = c[1];
                 v[n++] = c[2];
-                v[n++] = colors[face][0];
-                v[n++] = colors[face][1];
-                v[n++] = colors[face][2];
+                v[n++] = shade[face];
+                v[n++] = shade[face];
+                v[n++] = shade[face];
+                v[n++] = uvs[k][0];
+                v[n++] = uvs[k][1];
             }
         }
         return v;
@@ -209,12 +208,17 @@ final class TrianglePipeline {
     }
 
     private static void createDescriptors(VkDevice device, MemoryStack stack) {
-        VkDescriptorSetLayoutBinding.Buffer binding = VkDescriptorSetLayoutBinding.calloc(1, stack);
+        VkDescriptorSetLayoutBinding.Buffer binding = VkDescriptorSetLayoutBinding.calloc(2, stack);
         binding.get(0)
                 .binding(0)
                 .descriptorType(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER)
                 .descriptorCount(1)
                 .stageFlags(VK_SHADER_STAGE_VERTEX_BIT);
+        binding.get(1)
+                .binding(1)
+                .descriptorType(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
+                .descriptorCount(1)
+                .stageFlags(VK_SHADER_STAGE_FRAGMENT_BIT);
 
         VkDescriptorSetLayoutCreateInfo layoutInfo = VkDescriptorSetLayoutCreateInfo.calloc(stack)
                 .sType$Default()
@@ -223,8 +227,9 @@ final class TrianglePipeline {
         check(vkCreateDescriptorSetLayout(device, layoutInfo, null, out), "vkCreateDescriptorSetLayout");
         descriptorSetLayout = out.get(0);
 
-        VkDescriptorPoolSize.Buffer poolSize = VkDescriptorPoolSize.calloc(1, stack);
+        VkDescriptorPoolSize.Buffer poolSize = VkDescriptorPoolSize.calloc(2, stack);
         poolSize.get(0).type(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER).descriptorCount(1);
+        poolSize.get(1).type(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER).descriptorCount(1);
         VkDescriptorPoolCreateInfo poolInfo = VkDescriptorPoolCreateInfo.calloc(stack)
                 .sType$Default()
                 .pPoolSizes(poolSize)
@@ -241,7 +246,7 @@ final class TrianglePipeline {
 
         VkDescriptorBufferInfo.Buffer bufferInfo = VkDescriptorBufferInfo.calloc(1, stack);
         bufferInfo.get(0).buffer(uniformBuffer).offset(0L).range(64L);
-        VkWriteDescriptorSet.Buffer write = VkWriteDescriptorSet.calloc(1, stack);
+        VkWriteDescriptorSet.Buffer write = VkWriteDescriptorSet.calloc(2, stack);
         write.get(0)
                 .sType$Default()
                 .dstSet(descriptorSet)
@@ -250,6 +255,19 @@ final class TrianglePipeline {
                 .descriptorType(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER)
                 .descriptorCount(1)
                 .pBufferInfo(bufferInfo);
+        VkDescriptorImageInfo.Buffer imageInfo = VkDescriptorImageInfo.calloc(1, stack);
+        imageInfo.get(0)
+                .imageLayout(VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL)
+                .imageView(TextureImage.view())
+                .sampler(TextureImage.sampler());
+        write.get(1)
+                .sType$Default()
+                .dstSet(descriptorSet)
+                .dstBinding(1)
+                .dstArrayElement(0)
+                .descriptorType(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
+                .descriptorCount(1)
+                .pImageInfo(imageInfo);
         vkUpdateDescriptorSets(device, write, null);
     }
 
@@ -301,7 +319,7 @@ final class TrianglePipeline {
     }
 
     static void create(Logger logger, VkDevice device, VkPhysicalDevice physicalDevice,
-                       long renderPass, int width, int height) {
+                       long renderPass, int width, int height, VkQueue queue, int queueFamily) {
         try (MemoryStack stack = MemoryStack.stackPush()) {
             extentW = width;
             extentH = height;
@@ -309,6 +327,8 @@ final class TrianglePipeline {
             createVertexBuffer(device, physicalDevice, stack);
             createIndexBuffer(device, physicalDevice, stack);
             logger.info("[AetherVK] Index buffer created ({} indices).", INDICES.length);
+            TextureImage.create(device, physicalDevice, queue, queueFamily);
+            logger.info("[AetherVK] Texture created and uploaded (16x16).");
             createUniformBuffer(device, physicalDevice, stack);
             createDescriptors(device, stack);
             logger.info("[AetherVK] Uniform buffer and descriptor set created.");
@@ -326,9 +346,10 @@ final class TrianglePipeline {
             VkVertexInputBindingDescription.Buffer bindings = VkVertexInputBindingDescription.calloc(1, stack);
             bindings.get(0).binding(0).stride(STRIDE).inputRate(VK_VERTEX_INPUT_RATE_VERTEX);
 
-            VkVertexInputAttributeDescription.Buffer attributes = VkVertexInputAttributeDescription.calloc(2, stack);
+            VkVertexInputAttributeDescription.Buffer attributes = VkVertexInputAttributeDescription.calloc(3, stack);
             attributes.get(0).binding(0).location(0).format(VK_FORMAT_R32G32B32_SFLOAT).offset(0);
             attributes.get(1).binding(0).location(1).format(VK_FORMAT_R32G32B32_SFLOAT).offset(12);
+            attributes.get(2).binding(0).location(2).format(VK_FORMAT_R32G32_SFLOAT).offset(24);
 
             VkPipelineVertexInputStateCreateInfo vertexInput =
                     VkPipelineVertexInputStateCreateInfo.calloc(stack)
@@ -460,6 +481,7 @@ final class TrianglePipeline {
             descriptorPool = 0L;
             descriptorSet = 0L;
         }
+        TextureImage.destroy(device);
         if (descriptorSetLayout != 0L) {
             vkDestroyDescriptorSetLayout(device, descriptorSetLayout, null);
             descriptorSetLayout = 0L;

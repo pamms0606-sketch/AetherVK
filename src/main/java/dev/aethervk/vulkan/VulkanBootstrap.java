@@ -191,7 +191,7 @@ logger.info("[AetherVK] GLFW Vulkan surface extensions enabled.");
                 createImageViews(logger, stack);
                 DepthBuffer.create(logicalDevice, physicalDevice, swapchainWidth, swapchainHeight);
                 createRenderPassAndFramebuffers(logger, stack);
-                TrianglePipeline.create(logger, logicalDevice, physicalDevice, renderPass, swapchainWidth, swapchainHeight);
+                TrianglePipeline.create(logger, logicalDevice, physicalDevice, renderPass, swapchainWidth, swapchainHeight, graphicsQueue, graphicsQueueFamily);
                 createCommandPoolAndBuffers(logger, stack);
                 renderAndPresentTestFrame(logger, stack);
 

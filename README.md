@@ -2,7 +2,7 @@
 
 Experimental client-side Vulkan backend prototype for **Minecraft 1.21.1 + NeoForge**.
 
-> This is a development milestone, not a finished shader mod. It does **not** replace Minecraft's OpenGL renderer and does not draw the world. Minecraft keeps rendering through its normal path. AetherVK currently opens a separate GLFW Vulkan test window, clears it to a solid color and draws a single triangle. It does not parse Iris shader packs or run Bliss/BSL/Complementary yet. If Vulkan initialization fails, Minecraft keeps its normal renderer.
+> This is a development milestone, not a finished shader mod. It does **not** replace Minecraft's OpenGL renderer and does not draw the world. Minecraft keeps rendering through its normal path. AetherVK currently opens a separate GLFW Vulkan test window, clears it to a pulsing red and draws a colored triangle every frame. It does not parse Iris shader packs or run Bliss/BSL/Complementary yet. If Vulkan initialization fails, Minecraft keeps its normal renderer.
 
 ## Current milestone
 
@@ -15,10 +15,10 @@ Standalone Vulkan prototype, running in a separate test window next to Minecraft
 - Vulkan instance creation, portability-enumeration support, physical-device enumeration, graphics queue-family selection and logical-device creation.
 - Vulkan surface for a separate GLFW window (`GLFW_NO_API`) and a swapchain.
 - Swapchain image views, render pass, framebuffers, command pool and command buffers, semaphores and a fence.
-- One frame that clears the swapchain image to solid red, draws a colored triangle with a graphics pipeline and GLSL shaders (compiled to SPIR-V), and presents it.
+- A frame loop driven by Minecraft's `RenderFrameEvent.Post` (capped at about 60 frames per second) that clears the swapchain image to a red that pulses between black and red, draws a colored triangle with a graphics pipeline and GLSL shaders (compiled to SPIR-V), and presents it.
 - Graceful failure logging and cleanup.
 
-Not done yet: vertex buffers, a continuous render loop, swapchain recreation on resize, freeing Vulkan objects on shutdown, and any integration with Minecraft's own rendering.
+Not done yet: vertex buffers, swapchain recreation on resize (the frame loop stops if the swapchain becomes invalid), freeing Vulkan objects on shutdown, and any integration with Minecraft's own rendering.
 
 ## Tested on
 
@@ -58,7 +58,7 @@ If you use IntelliJ IDEA, open this directory as a Gradle project and let it imp
 gradle runClient
 ```
 
-Use a clean NeoForge 1.21.1 profile for initial testing. Read `latest.log` and search for `[AetherVK]`. A separate window titled "AetherVK Vulkan Test" should appear next to the Minecraft window, with a red background and a colored triangle.
+Use a clean NeoForge 1.21.1 profile for initial testing. Read `latest.log` and search for `[AetherVK]`. A separate window titled "AetherVK Vulkan Test" should appear next to the Minecraft window, with a red background that pulses between black and red, and a colored triangle.
 
 ## Shaders
 

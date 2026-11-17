@@ -35,10 +35,10 @@ final class TrianglePipeline {
             {1f, 0f, 1f}, {0f, 0f, 1f}, {1f, 1f, 0f}
         };
         int[] order = {0, 1, 2, 0, 2, 3};
-        float[] v = new float[36 * 6];
+        float[] v = new float[24 * 6];
         int n = 0;
         for (int face = 0; face < 6; face++) {
-            for (int k : order) {
+            for (int k = 0; k < 4; k++) {
                 float[] c = corners[face][k];
                 v[n++] = c[0];
                 v[n++] = c[1];
@@ -49,6 +49,26 @@ final class TrianglePipeline {
             }
         }
         return v;
+    }
+
+    private static final short[] INDICES = buildIndices();
+    private static final int INDEX_COUNT = INDICES.length;
+    private static long indexBuffer = 0L;
+    private static long indexMemory = 0L;
+
+    private static short[] buildIndices() {
+        short[] idx = new short[36];
+        int n = 0;
+        for (int face = 0; face < 6; face++) {
+            int b = face * 4;
+            idx[n++] = (short) b;
+            idx[n++] = (short) (b + 1);
+            idx[n++] = (short) (b + 2);
+            idx[n++] = (short) b;
+            idx[n++] = (short) (b + 2);
+            idx[n++] = (short) (b + 3);
+        }
+        return idx;
     }
 
     private static long pipelineLayout = 0L;
@@ -137,6 +157,53 @@ final class TrianglePipeline {
         vkUnmapMemory(device, vertexMemory);
     }
 
+    private static void createIndexBuffer(VkDevice device, VkPhysicalDevice physicalDevice, MemoryStack stack) {
+        long size = (long) INDICES.length * 2L;
+
+        VkBufferCreateInfo bufferInfo = VkBufferCreateInfo.calloc(stack)
+                .sType$Default()
+                .size(size)
+                .usage(VK_BUFFER_USAGE_INDEX_BUFFER_BIT)
+                .sharingMode(VK_SHARING_MODE_EXCLUSIVE);
+
+        LongBuffer out = stack.mallocLong(1);
+        check(vkCreateBuffer(device, bufferInfo, null, out), "vkCreateBuffer(index)");
+        indexBuffer = out.get(0);
+
+        VkMemoryRequirements req = VkMemoryRequirements.malloc(stack);
+        vkGetBufferMemoryRequirements(device, indexBuffer, req);
+
+        VkPhysicalDeviceMemoryProperties props = VkPhysicalDeviceMemoryProperties.malloc(stack);
+        vkGetPhysicalDeviceMemoryProperties(physicalDevice, props);
+
+        int wanted = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+        int typeIndex = -1;
+        for (int i = 0; i < props.memoryTypeCount(); i++) {
+            if ((req.memoryTypeBits() & (1 << i)) != 0
+                    && (props.memoryTypes(i).propertyFlags() & wanted) == wanted) {
+                typeIndex = i;
+                break;
+            }
+        }
+        if (typeIndex < 0) {
+            throw new IllegalStateException("No host-visible memory type found for the index buffer.");
+        }
+
+        VkMemoryAllocateInfo allocInfo = VkMemoryAllocateInfo.calloc(stack)
+                .sType$Default()
+                .allocationSize(req.size())
+                .memoryTypeIndex(typeIndex);
+        check(vkAllocateMemory(device, allocInfo, null, out), "vkAllocateMemory(index)");
+        indexMemory = out.get(0);
+        check(vkBindBufferMemory(device, indexBuffer, indexMemory, 0L), "vkBindBufferMemory(index)");
+
+        PointerBuffer data = stack.mallocPointer(1);
+        check(vkMapMemory(device, indexMemory, 0L, size, 0, data), "vkMapMemory(index)");
+        ByteBuffer bytes = MemoryUtil.memByteBuffer(data.get(0), (int) size).order(ByteOrder.nativeOrder());
+        bytes.asShortBuffer().put(INDICES);
+        vkUnmapMemory(device, indexMemory);
+    }
+
     static void create(Logger logger, VkDevice device, VkPhysicalDevice physicalDevice,
                        long renderPass, int width, int height) {
         try (MemoryStack stack = MemoryStack.stackPush()) {
@@ -144,6 +211,8 @@ final class TrianglePipeline {
             extentH = height;
             aspect = (float) width / (float) height;
             createVertexBuffer(device, physicalDevice, stack);
+            createIndexBuffer(device, physicalDevice, stack);
+            logger.info("[AetherVK] Index buffer created ({} indices).", INDICES.length);
             logger.info("[AetherVK] Vertex buffer created ({} vertices).", VERTICES.length / FLOATS_PER_VERTEX);
 
             long vert = createShaderModule(device, stack, "/assets/aethervk/shaders/triangle.vert.spv");
@@ -287,6 +356,14 @@ final class TrianglePipeline {
             org.lwjgl.vulkan.VK10.vkDestroyBuffer(device, vertexBuffer, null);
             vertexBuffer = 0L;
         }
+        if (indexBuffer != 0L) {
+            org.lwjgl.vulkan.VK10.vkDestroyBuffer(device, indexBuffer, null);
+            indexBuffer = 0L;
+        }
+        if (indexMemory != 0L) {
+            org.lwjgl.vulkan.VK10.vkFreeMemory(device, indexMemory, null);
+            indexMemory = 0L;
+        }
         if (vertexMemory != 0L) {
             org.lwjgl.vulkan.VK10.vkFreeMemory(device, vertexMemory, null);
             vertexMemory = 0L;
@@ -322,7 +399,8 @@ final class TrianglePipeline {
             ByteBuffer pushData = stack.malloc(64);
             mvp.get(pushData);
             vkCmdPushConstants(commandBuffer, pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, pushData);
-            vkCmdDraw(commandBuffer, 36, 1, 0, 0);
+            vkCmdBindIndexBuffer(commandBuffer, indexBuffer, 0L, VK_INDEX_TYPE_UINT16);
+            vkCmdDrawIndexed(commandBuffer, INDEX_COUNT, 1, 0, 0, 0);
         }
     }
 }

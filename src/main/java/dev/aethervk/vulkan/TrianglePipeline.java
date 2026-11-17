@@ -15,14 +15,41 @@ import org.slf4j.Logger;
 import static org.lwjgl.vulkan.VK10.*;
 
 final class TrianglePipeline {
-    private static final int FLOATS_PER_VERTEX = 5;
+    private static final int FLOATS_PER_VERTEX = 6;
     private static final int STRIDE = FLOATS_PER_VERTEX * 4;
 
-    private static final float[] VERTICES = {
-             0.0f, -0.5f,  1.0f, 0.0f, 0.0f,
-             0.5f,  0.5f,  0.0f, 1.0f, 0.0f,
-            -0.5f,  0.5f,  0.0f, 0.0f, 1.0f
-    };
+    private static final float[] VERTICES = buildCube();
+
+    private static float[] buildCube() {
+        float h = 0.5f;
+        float[][][] corners = {
+            {{-h, -h,  h}, { h, -h,  h}, { h,  h,  h}, {-h,  h,  h}},
+            {{ h, -h, -h}, {-h, -h, -h}, {-h,  h, -h}, { h,  h, -h}},
+            {{ h, -h,  h}, { h, -h, -h}, { h,  h, -h}, { h,  h,  h}},
+            {{-h, -h, -h}, {-h, -h,  h}, {-h,  h,  h}, {-h,  h, -h}},
+            {{-h,  h,  h}, { h,  h,  h}, { h,  h, -h}, {-h,  h, -h}},
+            {{ h, -h,  h}, {-h, -h,  h}, {-h, -h, -h}, { h, -h, -h}}
+        };
+        float[][] colors = {
+            {1f, 0f, 0f}, {0f, 1f, 1f}, {0f, 1f, 0f},
+            {1f, 0f, 1f}, {0f, 0f, 1f}, {1f, 1f, 0f}
+        };
+        int[] order = {0, 1, 2, 0, 2, 3};
+        float[] v = new float[36 * 6];
+        int n = 0;
+        for (int face = 0; face < 6; face++) {
+            for (int k : order) {
+                float[] c = corners[face][k];
+                v[n++] = c[0];
+                v[n++] = c[1];
+                v[n++] = c[2];
+                v[n++] = colors[face][0];
+                v[n++] = colors[face][1];
+                v[n++] = colors[face][2];
+            }
+        }
+        return v;
+    }
 
     private static long pipelineLayout = 0L;
     private static long pipeline = 0L;
@@ -132,8 +159,8 @@ final class TrianglePipeline {
             bindings.get(0).binding(0).stride(STRIDE).inputRate(VK_VERTEX_INPUT_RATE_VERTEX);
 
             VkVertexInputAttributeDescription.Buffer attributes = VkVertexInputAttributeDescription.calloc(2, stack);
-            attributes.get(0).binding(0).location(0).format(VK_FORMAT_R32G32_SFLOAT).offset(0);
-            attributes.get(1).binding(0).location(1).format(VK_FORMAT_R32G32B32_SFLOAT).offset(8);
+            attributes.get(0).binding(0).location(0).format(VK_FORMAT_R32G32B32_SFLOAT).offset(0);
+            attributes.get(1).binding(0).location(1).format(VK_FORMAT_R32G32B32_SFLOAT).offset(12);
 
             VkPipelineVertexInputStateCreateInfo vertexInput =
                     VkPipelineVertexInputStateCreateInfo.calloc(stack)
@@ -168,8 +195,8 @@ final class TrianglePipeline {
                             .rasterizerDiscardEnable(false)
                             .polygonMode(VK_POLYGON_MODE_FILL)
                             .lineWidth(1.0f)
-                            .cullMode(VK_CULL_MODE_NONE)
-                            .frontFace(VK_FRONT_FACE_CLOCKWISE)
+                            .cullMode(VK_CULL_MODE_BACK_BIT)
+                            .frontFace(VK_FRONT_FACE_COUNTER_CLOCKWISE)
                             .depthBiasEnable(false);
 
             VkPipelineMultisampleStateCreateInfo multisample =
@@ -192,7 +219,7 @@ final class TrianglePipeline {
                             .pAttachments(blendAttachment);
 
             VkPushConstantRange.Buffer pushRange = VkPushConstantRange.calloc(1, stack);
-            pushRange.get(0).stageFlags(VK_SHADER_STAGE_VERTEX_BIT).offset(0).size(8);
+            pushRange.get(0).stageFlags(VK_SHADER_STAGE_VERTEX_BIT).offset(0).size(64);
             org.lwjgl.vulkan.VkPipelineDynamicStateCreateInfo dynamicState =
                     org.lwjgl.vulkan.VkPipelineDynamicStateCreateInfo.calloc(stack)
                             .sType(VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO)
@@ -277,8 +304,16 @@ final class TrianglePipeline {
             sc.get(0).extent().set(extentW, extentH);
             vkCmdSetScissor(commandBuffer, 0, sc);
             vkCmdBindVertexBuffers(commandBuffer, 0, stack.longs(vertexBuffer), stack.longs(0L));
-            vkCmdPushConstants(commandBuffer, pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, stack.floats(angle, aspect));
-            vkCmdDraw(commandBuffer, 3, 1, 0, 0);
+            org.joml.Matrix4f mvp = new org.joml.Matrix4f()
+                    .scale(1.0f, -1.0f, 1.0f)
+                    .perspective((float) Math.toRadians(60.0), aspect, 0.1f, 100.0f, true)
+                    .translate(0.0f, 0.0f, -2.5f)
+                    .rotateY(angle)
+                    .rotateX(angle * 0.5f);
+            ByteBuffer pushData = stack.malloc(64);
+            mvp.get(pushData);
+            vkCmdPushConstants(commandBuffer, pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, pushData);
+            vkCmdDraw(commandBuffer, 36, 1, 0, 0);
         }
     }
 }

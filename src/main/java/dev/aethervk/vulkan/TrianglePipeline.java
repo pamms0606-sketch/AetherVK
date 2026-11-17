@@ -29,6 +29,7 @@ final class TrianglePipeline {
     private static long vertexBuffer = 0L;
     private static long vertexMemory = 0L;
 
+    private static float aspect = 1f;
     private TrianglePipeline() {}
 
     private static void check(int result, String what) {
@@ -110,6 +111,7 @@ final class TrianglePipeline {
     static void create(Logger logger, VkDevice device, VkPhysicalDevice physicalDevice,
                        long renderPass, int width, int height) {
         try (MemoryStack stack = MemoryStack.stackPush()) {
+            aspect = (float) width / (float) height;
             createVertexBuffer(device, physicalDevice, stack);
             logger.info("[AetherVK] Vertex buffer created ({} vertices).", VERTICES.length / FLOATS_PER_VERTEX);
 
@@ -186,7 +188,7 @@ final class TrianglePipeline {
                             .pAttachments(blendAttachment);
 
             VkPushConstantRange.Buffer pushRange = VkPushConstantRange.calloc(1, stack);
-            pushRange.get(0).stageFlags(VK_SHADER_STAGE_VERTEX_BIT).offset(0).size(4);
+            pushRange.get(0).stageFlags(VK_SHADER_STAGE_VERTEX_BIT).offset(0).size(8);
             VkPipelineLayoutCreateInfo layoutInfo =
                     VkPipelineLayoutCreateInfo.calloc(stack).sType$Default().pPushConstantRanges(pushRange);
             LongBuffer out = stack.mallocLong(1);
@@ -230,7 +232,7 @@ final class TrianglePipeline {
         try (MemoryStack stack = MemoryStack.stackPush()) {
             vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
             vkCmdBindVertexBuffers(commandBuffer, 0, stack.longs(vertexBuffer), stack.longs(0L));
-            vkCmdPushConstants(commandBuffer, pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, stack.floats(angle));
+            vkCmdPushConstants(commandBuffer, pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, stack.floats(angle, aspect));
             vkCmdDraw(commandBuffer, 3, 1, 0, 0);
         }
     }

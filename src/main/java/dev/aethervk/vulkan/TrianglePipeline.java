@@ -235,6 +235,28 @@ final class TrianglePipeline {
         record(commandBuffer, 0.0f);
     }
 
+    static void destroy(org.lwjgl.vulkan.VkDevice device) {
+        if (device == null) {
+            return;
+        }
+        if (pipeline != 0L) {
+            org.lwjgl.vulkan.VK10.vkDestroyPipeline(device, pipeline, null);
+            pipeline = 0L;
+        }
+        if (pipelineLayout != 0L) {
+            org.lwjgl.vulkan.VK10.vkDestroyPipelineLayout(device, pipelineLayout, null);
+            pipelineLayout = 0L;
+        }
+        if (vertexBuffer != 0L) {
+            org.lwjgl.vulkan.VK10.vkDestroyBuffer(device, vertexBuffer, null);
+            vertexBuffer = 0L;
+        }
+        if (vertexMemory != 0L) {
+            org.lwjgl.vulkan.VK10.vkFreeMemory(device, vertexMemory, null);
+            vertexMemory = 0L;
+        }
+    }
+
     static void setExtent(int w, int h) {
         extentW = w;
         extentH = h;

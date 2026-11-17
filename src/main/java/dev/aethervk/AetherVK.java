@@ -9,6 +9,7 @@ import net.neoforged.fml.common.Mod;
 import net.neoforged.neoforge.client.event.ClientTickEvent;
 import net.neoforged.neoforge.client.event.RenderFrameEvent;
 import net.neoforged.neoforge.common.NeoForge;
+import net.neoforged.neoforge.event.GameShuttingDownEvent;
 import org.slf4j.Logger;
 
 @Mod(value = AetherVK.MOD_ID, dist = Dist.CLIENT)
@@ -24,6 +25,7 @@ public final class AetherVK {
     public AetherVK(IEventBus modEventBus) {
         NeoForge.EVENT_BUS.addListener(this::onClientTick);
         NeoForge.EVENT_BUS.addListener(this::onRenderFrame);
+        NeoForge.EVENT_BUS.addListener(this::onShutdown);
         LOGGER.info("AetherVK {} loaded. Waiting for the Minecraft window.", "0.1.0");
     }
 
@@ -38,6 +40,10 @@ public final class AetherVK {
 
         initialized = true;
         VulkanBootstrap.initialize(LOGGER);
+    }
+
+    private void onShutdown(GameShuttingDownEvent event) {
+        VulkanBootstrap.shutdown(LOGGER);
     }
 
     private void onRenderFrame(RenderFrameEvent.Post event) {

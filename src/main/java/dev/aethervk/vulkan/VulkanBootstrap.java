@@ -955,10 +955,25 @@ dependency.get(0)
         }
     }
 
+    private static volatile boolean shuttingDown = false;
+
+    public static void shutdown(Logger logger) {
+        if (!STARTED.get() || shuttingDown) {
+            return;
+        }
+        shuttingDown = true;
+        drawFailed = true;
+        logger.info("[AetherVK] Shutting down Vulkan resources.");
+        destroyQuietly(logger);
+        logger.info("[AetherVK] Vulkan shutdown complete.");
+    }
+
     private static void destroyQuietly(Logger logger) {
         try {
             if (logicalDevice != null) {
                 vkDeviceWaitIdle(logicalDevice);
+
+                TrianglePipeline.destroy(logicalDevice);
 
                 if (renderFence != 0L) {
                     vkDestroyFence(logicalDevice, renderFence, null);
@@ -1016,6 +1031,11 @@ dependency.get(0)
                 surface = 0L;
             }
             if (testWindow != 0L) {
+                GLFW.glfwSetWindowRefreshCallback(testWindow, null);
+                if (refreshCallback != null) {
+                    refreshCallback.free();
+                    refreshCallback = null;
+                }
                 GLFW.glfwDestroyWindow(testWindow);
                 testWindow = 0L;
             }

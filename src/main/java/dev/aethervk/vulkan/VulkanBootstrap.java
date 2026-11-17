@@ -888,6 +888,67 @@ dependency.get(0)
         }
     }
 
+    private static void recreateSwapchain(Logger logger) {
+        try (MemoryStack stack = MemoryStack.stackPush()) {
+            IntBuffer w = stack.ints(0);
+            IntBuffer h = stack.ints(0);
+            GLFW.glfwGetFramebufferSize(testWindow, w, h);
+            if (w.get(0) <= 0 || h.get(0) <= 0) {
+                return;
+            }
+
+            vkDeviceWaitIdle(logicalDevice);
+
+            for (long fb : framebuffers) {
+                if (fb != 0L) {
+                    vkDestroyFramebuffer(logicalDevice, fb, null);
+                }
+            }
+            framebuffers = new long[0];
+
+            for (long view : imageViews) {
+                if (view != 0L) {
+                    vkDestroyImageView(logicalDevice, view, null);
+                }
+            }
+            imageViews = new long[0];
+
+            if (swapchain != 0L) {
+                org.lwjgl.vulkan.KHRSwapchain.vkDestroySwapchainKHR(logicalDevice, swapchain, null);
+                swapchain = 0L;
+            }
+            swapchainImages = new long[0];
+
+            createSwapchain(logger, stack);
+            createImageViews(logger, stack);
+
+            if (swapchainImages.length > commandBuffers.length) {
+                throw new IllegalStateException("Swapchain has more images than command buffers.");
+            }
+
+            framebuffers = new long[imageViews.length];
+            for (int i = 0; i < imageViews.length; i++) {
+                VkFramebufferCreateInfo framebufferInfo =
+                        VkFramebufferCreateInfo.calloc(stack)
+                                .sType$Default()
+                                .renderPass(renderPass)
+                                .pAttachments(stack.longs(imageViews[i]))
+                                .width(swapchainWidth)
+                                .height(swapchainHeight)
+                                .layers(1);
+                LongBuffer framebufferOut = stack.mallocLong(1);
+                checkVk(
+                        vkCreateFramebuffer(logicalDevice, framebufferInfo, null, framebufferOut),
+                        "vkCreateFramebuffer[recreate " + i + "]"
+                );
+                framebuffers[i] = framebufferOut.get(0);
+            }
+
+            TrianglePipeline.setExtent(swapchainWidth, swapchainHeight);
+            logger.info("[AetherVK] Swapchain recreated at {}x{}.", swapchainWidth, swapchainHeight);
+        }
+    }
+
     private static void destroyQuietly(Logger logger) {
         try {
             if (logicalDevice != null) {
@@ -963,6 +1024,9 @@ dependency.get(0)
 
     private static long frameCounter = 0L;
     private static boolean drawFailed = false;
+    private static boolean needRecreate = false;
+    private static int lastFbW = 0;
+    private static int lastFbH = 0;
 
     public static void drawFrame(Logger logger) {
         if (drawFailed || logicalDevice == null || graphicsQueue == null || swapchain == 0L
@@ -972,11 +1036,33 @@ dependency.get(0)
         }
 
         try (MemoryStack stack = MemoryStack.stackPush()) {
+            IntBuffer fbw = stack.ints(0);
+            IntBuffer fbh = stack.ints(0);
+            GLFW.glfwGetFramebufferSize(testWindow, fbw, fbh);
+            if (fbw.get(0) <= 0 || fbh.get(0) <= 0) {
+                return;
+            }
+            if (lastFbW == 0) {
+                lastFbW = fbw.get(0);
+                lastFbH = fbh.get(0);
+            }
+            if (needRecreate || fbw.get(0) != lastFbW || fbh.get(0) != lastFbH) {
+                lastFbW = fbw.get(0);
+                lastFbH = fbh.get(0);
+                needRecreate = false;
+                recreateSwapchain(logger);
+                return;
+            }
+
             IntBuffer imageIndex = stack.mallocInt(1);
             int acquire = org.lwjgl.vulkan.KHRSwapchain.vkAcquireNextImageKHR(
                     logicalDevice, swapchain, 20_000_000L,
                     imageAvailableSemaphore, 0L, imageIndex);
 
+            if (acquire == org.lwjgl.vulkan.KHRSwapchain.VK_ERROR_OUT_OF_DATE_KHR) {
+                needRecreate = true;
+                return;
+            }
             if (acquire == VK_TIMEOUT || acquire == VK_NOT_READY) {
                 return;
             }
@@ -1055,6 +1141,10 @@ dependency.get(0)
 
             int presentResult =
                     org.lwjgl.vulkan.KHRSwapchain.vkQueuePresentKHR(graphicsQueue, present);
+            if (presentResult == org.lwjgl.vulkan.KHRSwapchain.VK_ERROR_OUT_OF_DATE_KHR) {
+                needRecreate = true;
+                return;
+            }
             if (presentResult != VK_SUCCESS
                     && presentResult != org.lwjgl.vulkan.KHRSwapchain.VK_SUBOPTIMAL_KHR) {
                 logger.warn("[AetherVK] drawFrame stopped: vkQueuePresentKHR returned {}.", presentResult);

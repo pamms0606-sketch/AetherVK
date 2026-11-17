@@ -18,7 +18,7 @@ Standalone Vulkan prototype, running in a separate test window next to Minecraft
 - A frame loop driven by Minecraft's `RenderFrameEvent.Post` (capped at about 60 frames per second) that clears the swapchain image to a red that pulses between black and red, draws a colored triangle with a graphics pipeline and GLSL shaders (compiled to SPIR-V), and presents it.
 - Graceful failure logging and cleanup.
 
-Not done yet: vertex buffers, swapchain recreation on resize (the frame loop stops if the swapchain becomes invalid), freeing Vulkan objects on shutdown, and any integration with Minecraft's own rendering.
+Not done yet: swapchain recreation on resize (the frame loop stops if the swapchain becomes invalid), freeing Vulkan objects on shutdown, and any integration with Minecraft's own rendering.
 
 ## Tested on
 
@@ -78,7 +78,7 @@ Do not copy random Vulkan `.dylib` files into the Minecraft installation. Use th
 
 1. **0.1 — Vulkan bootstrap:** instance + physical/logical device. Done.
 2. **0.2 to 0.9 — Standalone presentation test:** surface, swapchain, image views, command buffers, synchronization, render pass, framebuffers, a clear-and-present test and a first triangle (graphics pipeline and GLSL shaders) in a separate window. Done.
-3. **Next — Render bridge prototype:** prove a small Vulkan pass can coexist with Minecraft's lifecycle, then design a controlled replacement path for the world renderer. This includes vertex buffers, swapchain recreation on resize and integration with Minecraft's window.
+3. **Next — Render bridge prototype:** prove a small Vulkan pass can coexist with Minecraft's lifecycle, then design a controlled replacement path for the world renderer. This includes swapchain recreation on resize and integration with Minecraft's window.
 4. **Shader-pack reader:** safely inspect ZIP packs, parse `shaders.properties`, discover programs and options.
 5. **Iris compatibility layer:** implement program/pass scheduling, uniforms, samplers, image formats, shadow passes and G-buffer semantics.
 6. **Shader coverage:** test simple packs first, then progressively test BSL, Complementary and Bliss. Compatibility will be feature-by-feature, not guaranteed for every pack.

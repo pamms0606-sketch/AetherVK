@@ -72,9 +72,11 @@ public final class VulkanBootstrap {
     private static volatile long[] imageViews = new long[0];
     private static volatile long commandPool;
     private static volatile VkCommandBuffer[] commandBuffers = new VkCommandBuffer[0];
-    private static volatile long imageAvailableSemaphore;
-    private static volatile long renderFinishedSemaphore;
-    private static volatile long renderFence;
+    private static final int MAX_FRAMES_IN_FLIGHT = TrianglePipeline.FRAMES;
+    private static volatile long[] imageAvailableSemaphores = new long[0];
+    private static volatile long[] renderFinishedSemaphores = new long[0];
+    private static volatile long[] inFlightFences = new long[0];
+    private static int currentFrame = 0;
     private static volatile int swapchainFormat;
     private static volatile int swapchainWidth;
     private static volatile int swapchainHeight;
@@ -663,15 +665,15 @@ dependency.get(0)
                 .sType$Default()
                 .commandPool(commandPool)
                 .level(VK_COMMAND_BUFFER_LEVEL_PRIMARY)
-                .commandBufferCount(swapchainImages.length);
+                .commandBufferCount(Math.max(swapchainImages.length, MAX_FRAMES_IN_FLIGHT));
 
-        PointerBuffer commandBufferOut = stack.mallocPointer(swapchainImages.length);
+        PointerBuffer commandBufferOut = stack.mallocPointer(Math.max(swapchainImages.length, MAX_FRAMES_IN_FLIGHT));
         checkVk(
                 vkAllocateCommandBuffers(logicalDevice, allocationInfo, commandBufferOut),
                 "vkAllocateCommandBuffers"
         );
 
-        commandBuffers = new VkCommandBuffer[swapchainImages.length];
+        commandBuffers = new VkCommandBuffer[Math.max(swapchainImages.length, MAX_FRAMES_IN_FLIGHT)];
         for (int i = 0; i < commandBuffers.length; i++) {
             commandBuffers[i] = new VkCommandBuffer(commandBufferOut.get(i), logicalDevice);
         }
@@ -683,6 +685,48 @@ dependency.get(0)
     }
 
 
+    private static void createSyncObjects(Logger logger, MemoryStack stack) {
+        VkSemaphoreCreateInfo semaphoreInfo = VkSemaphoreCreateInfo.calloc(stack).sType$Default();
+        VkFenceCreateInfo fenceInfo = VkFenceCreateInfo.calloc(stack)
+                .sType$Default()
+                .flags(VK_FENCE_CREATE_SIGNALED_BIT);
+        LongBuffer out = stack.mallocLong(1);
+
+        imageAvailableSemaphores = new long[MAX_FRAMES_IN_FLIGHT];
+        inFlightFences = new long[MAX_FRAMES_IN_FLIGHT];
+        for (int i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
+            checkVk(vkCreateSemaphore(logicalDevice, semaphoreInfo, null, out),
+                    "vkCreateSemaphore(image available)");
+            imageAvailableSemaphores[i] = out.get(0);
+            checkVk(vkCreateFence(logicalDevice, fenceInfo, null, out),
+                    "vkCreateFence(in flight)");
+            inFlightFences[i] = out.get(0);
+        }
+        createRenderFinishedSemaphores(stack);
+        currentFrame = 0;
+        logger.info("[AetherVK] Sync objects created for {} frames in flight.", MAX_FRAMES_IN_FLIGHT);
+    }
+
+    private static void createRenderFinishedSemaphores(MemoryStack stack) {
+        VkSemaphoreCreateInfo semaphoreInfo = VkSemaphoreCreateInfo.calloc(stack).sType$Default();
+        LongBuffer out = stack.mallocLong(1);
+        renderFinishedSemaphores = new long[swapchainImages.length];
+        for (int i = 0; i < renderFinishedSemaphores.length; i++) {
+            checkVk(vkCreateSemaphore(logicalDevice, semaphoreInfo, null, out),
+                    "vkCreateSemaphore(render finished)");
+            renderFinishedSemaphores[i] = out.get(0);
+        }
+    }
+
+    private static void destroyRenderFinishedSemaphores() {
+        for (long s : renderFinishedSemaphores) {
+            if (s != 0L) {
+                vkDestroySemaphore(logicalDevice, s, null);
+            }
+        }
+        renderFinishedSemaphores = new long[0];
+    }
+
     private static void renderAndPresentTestFrame(Logger logger, MemoryStack stack) {
 
         if (commandBuffers.length == 0 || graphicsQueue == null ||
@@ -690,33 +734,9 @@ dependency.get(0)
             throw new IllegalStateException("Vulkan rendering resources unavailable.");
         }
 
-        VkSemaphoreCreateInfo semaphoreInfo =
-                VkSemaphoreCreateInfo.calloc(stack).sType$Default();
-
-        LongBuffer semaphoreOut = stack.mallocLong(1);
-
-        checkVk(
-                vkCreateSemaphore(logicalDevice, semaphoreInfo, null, semaphoreOut),
-                "vkCreateSemaphore(image available)"
-        );
-        imageAvailableSemaphore = semaphoreOut.get(0);
-
-        checkVk(
-                vkCreateSemaphore(logicalDevice, semaphoreInfo, null, semaphoreOut),
-                "vkCreateSemaphore(render finished)"
-        );
-        renderFinishedSemaphore = semaphoreOut.get(0);
-
-        VkFenceCreateInfo fenceInfo =
-                VkFenceCreateInfo.calloc(stack).sType$Default();
-
-        LongBuffer fenceOut = stack.mallocLong(1);
-
-        checkVk(
-                vkCreateFence(logicalDevice, fenceInfo, null, fenceOut),
-                "vkCreateFence(render)"
-        );
-        renderFence = fenceOut.get(0);
+        createSyncObjects(logger, stack);
+        // The fence is created signaled (for drawFrame); this first frame needs it unsignaled.
+        checkVk(vkResetFences(logicalDevice, stack.longs(inFlightFences[0])), "vkResetFences(test frame)");
 
         IntBuffer imageIndex = stack.mallocInt(1);
 
@@ -724,7 +744,7 @@ dependency.get(0)
                 logicalDevice,
                 swapchain,
                 -1L,
-                imageAvailableSemaphore,
+                imageAvailableSemaphores[0],
                 0L,
                 imageIndex
         );
@@ -798,29 +818,20 @@ dependency.get(0)
         VkSubmitInfo submitInfo = VkSubmitInfo.calloc(stack)
                 .sType$Default()
                 .waitSemaphoreCount(1)
-                .pWaitSemaphores(stack.longs(imageAvailableSemaphore))
+                .pWaitSemaphores(stack.longs(imageAvailableSemaphores[0]))
                 .pWaitDstStageMask(stack.ints(VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT))
                 .pCommandBuffers(commandBufferPointers)
-                .pSignalSemaphores(stack.longs(renderFinishedSemaphore));
-
-        logger.info("[AetherVK] DEBUG waitSemaphoreCount={}", submitInfo.waitSemaphoreCount());
-        logger.info("[AetherVK] DEBUG imageAvailableSemaphore=0x{}", Long.toHexString(imageAvailableSemaphore));
-        logger.info("[AetherVK] DEBUG renderFinishedSemaphore=0x{}", Long.toHexString(renderFinishedSemaphore));
-        logger.info("[AetherVK] DEBUG waitStageMask={}", submitInfo.pWaitDstStageMask().get(0));
-        if (submitInfo.waitSemaphoreCount() > 0) {
-            logger.info("[AetherVK] DEBUG submittedWaitSemaphore=0x{}",
-                    Long.toHexString(submitInfo.pWaitSemaphores().get(0)));
-        }
+                .pSignalSemaphores(stack.longs(renderFinishedSemaphores[index]));
 
         checkVk(
-                vkQueueSubmit(graphicsQueue, submitInfo, renderFence),
+                vkQueueSubmit(graphicsQueue, submitInfo, inFlightFences[0]),
                 "vkQueueSubmit(render)"
         );
         checkVk(vkQueueWaitIdle(graphicsQueue), "vkQueueWaitIdle(before present)");
         org.lwjgl.vulkan.VkPresentInfoKHR presentInfo =
                 org.lwjgl.vulkan.VkPresentInfoKHR.calloc(stack)
                         .sType$Default()
-                        .pWaitSemaphores(stack.longs(renderFinishedSemaphore))
+                        .pWaitSemaphores(stack.longs(renderFinishedSemaphores[index]))
                         .swapchainCount(1)
                         .pSwapchains(stack.longs(swapchain))
                         .pImageIndices(stack.ints(index));
@@ -841,7 +852,7 @@ dependency.get(0)
         checkVk(
                 vkWaitForFences(
                         logicalDevice,
-                        stack.longs(renderFence),
+                        stack.longs(inFlightFences[0]),
                         true,
                         -1L
                 ),
@@ -921,6 +932,7 @@ dependency.get(0)
             }
 
             vkDeviceWaitIdle(logicalDevice);
+            destroyRenderFinishedSemaphores();
 
             for (long fb : framebuffers) {
                 if (fb != 0L) {
@@ -944,6 +956,7 @@ dependency.get(0)
 
             createSwapchain(logger, stack);
             createImageViews(logger, stack);
+            createRenderFinishedSemaphores(stack);
 
             DepthBuffer.destroy(logicalDevice);
             DepthBuffer.create(logicalDevice, physicalDevice, swapchainWidth, swapchainHeight);
@@ -995,20 +1008,21 @@ dependency.get(0)
 
                 TrianglePipeline.destroy(logicalDevice);
 
-                if (renderFence != 0L) {
-                    vkDestroyFence(logicalDevice, renderFence, null);
-                    renderFence = 0L;
+                for (long f : inFlightFences) {
+                    if (f != 0L) {
+                        vkDestroyFence(logicalDevice, f, null);
+                    }
                 }
+                inFlightFences = new long[0];
 
-                if (imageAvailableSemaphore != 0L) {
-                    vkDestroySemaphore(logicalDevice, imageAvailableSemaphore, null);
-                    imageAvailableSemaphore = 0L;
+                for (long s : imageAvailableSemaphores) {
+                    if (s != 0L) {
+                        vkDestroySemaphore(logicalDevice, s, null);
+                    }
                 }
+                imageAvailableSemaphores = new long[0];
 
-                if (renderFinishedSemaphore != 0L) {
-                    vkDestroySemaphore(logicalDevice, renderFinishedSemaphore, null);
-                    renderFinishedSemaphore = 0L;
-                }
+                destroyRenderFinishedSemaphores();
 
                 for (int i = 0; i < framebuffers.length; i++) {
                     if (framebuffers[i] != 0L) {
@@ -1080,8 +1094,10 @@ dependency.get(0)
 
     public static void drawFrame(Logger logger) {
         if (drawFailed || logicalDevice == null || graphicsQueue == null || swapchain == 0L
-                || renderPass == 0L || commandBuffers.length == 0 || renderFence == 0L
-                || imageAvailableSemaphore == 0L || renderFinishedSemaphore == 0L) {
+                || renderPass == 0L || commandBuffers.length < MAX_FRAMES_IN_FLIGHT
+                || inFlightFences.length != MAX_FRAMES_IN_FLIGHT
+                || imageAvailableSemaphores.length != MAX_FRAMES_IN_FLIGHT
+                || renderFinishedSemaphores.length != swapchainImages.length) {
             return;
         }
 
@@ -1104,10 +1120,19 @@ dependency.get(0)
                 return;
             }
 
+            int frame = currentFrame;
+
+            // Wait only until the GPU has finished the frame that used this slot last time.
+            int fenceWait = vkWaitForFences(logicalDevice, stack.longs(inFlightFences[frame]), true, 1_000_000_000L);
+            if (fenceWait == VK_TIMEOUT) {
+                return;
+            }
+            checkVk(fenceWait, "vkWaitForFences(frame)");
+
             IntBuffer imageIndex = stack.mallocInt(1);
             int acquire = org.lwjgl.vulkan.KHRSwapchain.vkAcquireNextImageKHR(
                     logicalDevice, swapchain, 20_000_000L,
-                    imageAvailableSemaphore, 0L, imageIndex);
+                    imageAvailableSemaphores[frame], 0L, imageIndex);
 
             if (acquire == org.lwjgl.vulkan.KHRSwapchain.VK_ERROR_OUT_OF_DATE_KHR) {
                 needRecreate = true;
@@ -1130,7 +1155,7 @@ dependency.get(0)
                 return;
             }
 
-            VkCommandBuffer cb = commandBuffers[index];
+            VkCommandBuffer cb = commandBuffers[frame];
             checkVk(vkResetCommandBuffer(cb, 0), "vkResetCommandBuffer(frame)");
 
             VkCommandBufferBeginInfo beginInfo =
@@ -1164,7 +1189,7 @@ dependency.get(0)
                             .pClearValues(clearValues);
 
             vkCmdBeginRenderPass(cb, renderBeginInfo, VK_SUBPASS_CONTENTS_INLINE);
-            TrianglePipeline.record(cb, (float) ((System.nanoTime() % 6_000_000_000L) / 6_000_000_000.0 * 2.0 * Math.PI));
+            TrianglePipeline.record(cb, (float) ((System.nanoTime() % 6_000_000_000L) / 6_000_000_000.0 * 2.0 * Math.PI), frame);
             vkCmdEndRenderPass(cb);
             checkVk(vkEndCommandBuffer(cb), "vkEndCommandBuffer(frame)");
 
@@ -1174,18 +1199,19 @@ dependency.get(0)
             VkSubmitInfo submit = VkSubmitInfo.calloc(stack)
                     .sType$Default()
                     .waitSemaphoreCount(1)
-                    .pWaitSemaphores(stack.longs(imageAvailableSemaphore))
+                    .pWaitSemaphores(stack.longs(imageAvailableSemaphores[frame]))
                     .pWaitDstStageMask(stack.ints(VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT))
                     .pCommandBuffers(cbs)
-                    .pSignalSemaphores(stack.longs(renderFinishedSemaphore));
+                    .pSignalSemaphores(stack.longs(renderFinishedSemaphores[index]));
 
-            checkVk(vkResetFences(logicalDevice, stack.longs(renderFence)), "vkResetFences(frame)");
-            checkVk(vkQueueSubmit(graphicsQueue, submit, renderFence), "vkQueueSubmit(frame)");
+            checkVk(vkResetFences(logicalDevice, stack.longs(inFlightFences[frame])), "vkResetFences(frame)");
+            checkVk(vkQueueSubmit(graphicsQueue, submit, inFlightFences[frame]), "vkQueueSubmit(frame)");
+            currentFrame = (frame + 1) % MAX_FRAMES_IN_FLIGHT;
 
             org.lwjgl.vulkan.VkPresentInfoKHR present =
                     org.lwjgl.vulkan.VkPresentInfoKHR.calloc(stack)
                             .sType$Default()
-                            .pWaitSemaphores(stack.longs(renderFinishedSemaphore))
+                            .pWaitSemaphores(stack.longs(renderFinishedSemaphores[index]))
                             .swapchainCount(1)
                             .pSwapchains(stack.longs(swapchain))
                             .pImageIndices(stack.ints(index));
@@ -1202,8 +1228,6 @@ dependency.get(0)
                 drawFailed = true;
                 return;
             }
-
-            checkVk(vkQueueWaitIdle(graphicsQueue), "vkQueueWaitIdle(frame)");
 
             frameCounter++;
             if (frameCounter == 1 || frameCounter % 100 == 0) {

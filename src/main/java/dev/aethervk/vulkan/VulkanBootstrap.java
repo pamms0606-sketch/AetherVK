@@ -191,7 +191,8 @@ logger.info("[AetherVK] GLFW Vulkan surface extensions enabled.");
                 createLogicalDevice(logger, stack);
                 createSwapchain(logger, stack);
                 createImageViews(logger, stack);
-                DepthBuffer.create(logicalDevice, physicalDevice, swapchainWidth, swapchainHeight);
+                DepthBuffer.create(logicalDevice, physicalDevice, swapchainWidth, swapchainHeight,
+                        swapchainImages.length);
                 createRenderPassAndFramebuffers(logger, stack);
                 TrianglePipeline.create(logger, logicalDevice, physicalDevice, renderPass, swapchainWidth, swapchainHeight, graphicsQueue, graphicsQueueFamily);
                 createCommandPoolAndBuffers(logger, stack);
@@ -648,7 +649,15 @@ dependency.get(0)
         );
 
         renderPass = renderPassOut.get(0);
+        logger.info("[AetherVK] Render pass created successfully for format {}.", swapchainFormat);
 
+        createFramebuffers(logger, stack);
+    }
+
+    private static void createFramebuffers(Logger logger, MemoryStack stack) {
+        if (imageViews.length == 0 || DepthBuffer.count() != imageViews.length) {
+            throw new IllegalStateException("Framebuffer attachments do not match swapchain images.");
+        }
         framebuffers = new long[imageViews.length];
 
         for (int i = 0; i < imageViews.length; i++) {
@@ -656,7 +665,7 @@ dependency.get(0)
                     VkFramebufferCreateInfo.calloc(stack)
                             .sType$Default()
                             .renderPass(renderPass)
-                            .pAttachments(stack.longs(imageViews[i], DepthBuffer.view()))
+                            .pAttachments(stack.longs(imageViews[i], DepthBuffer.view(i)))
                             .width(swapchainWidth)
                             .height(swapchainHeight)
                             .layers(1);
@@ -673,10 +682,6 @@ dependency.get(0)
             framebuffers[i] = framebufferOut.get(0);
         }
 
-        logger.info(
-                "[AetherVK] Render pass created successfully for format {}.",
-                swapchainFormat
-        );
         logger.info(
                 "[AetherVK] Created {} framebuffers at {}x{}.",
                 framebuffers.length, swapchainWidth, swapchainHeight
@@ -704,15 +709,15 @@ dependency.get(0)
                 .sType$Default()
                 .commandPool(commandPool)
                 .level(VK_COMMAND_BUFFER_LEVEL_PRIMARY)
-                .commandBufferCount(Math.max(swapchainImages.length, MAX_FRAMES_IN_FLIGHT));
+                .commandBufferCount(MAX_FRAMES_IN_FLIGHT);
 
-        PointerBuffer commandBufferOut = stack.mallocPointer(Math.max(swapchainImages.length, MAX_FRAMES_IN_FLIGHT));
+        PointerBuffer commandBufferOut = stack.mallocPointer(MAX_FRAMES_IN_FLIGHT);
         checkVk(
                 vkAllocateCommandBuffers(logicalDevice, allocationInfo, commandBufferOut),
                 "vkAllocateCommandBuffers"
         );
 
-        commandBuffers = new VkCommandBuffer[Math.max(swapchainImages.length, MAX_FRAMES_IN_FLIGHT)];
+        commandBuffers = new VkCommandBuffer[MAX_FRAMES_IN_FLIGHT];
         for (int i = 0; i < commandBuffers.length; i++) {
             commandBuffers[i] = new VkCommandBuffer(commandBufferOut.get(i), logicalDevice);
         }
@@ -794,15 +799,17 @@ dependency.get(0)
                     "vkAcquireNextImageKHR failed with VkResult=" + acquireResult
             );
         }
+        if (acquireResult == org.lwjgl.vulkan.KHRSwapchain.VK_SUBOPTIMAL_KHR) {
+            needRecreate = true;
+        }
 
         int index = imageIndex.get(0);
 
-        if (index < 0 || index >= commandBuffers.length ||
-                index >= framebuffers.length) {
+        if (index < 0 || index >= framebuffers.length) {
             throw new IllegalStateException("Acquired swapchain image index is invalid.");
         }
 
-        VkCommandBuffer commandBuffer = commandBuffers[index];
+        VkCommandBuffer commandBuffer = commandBuffers[0];
 
         VkCommandBufferBeginInfo beginInfo =
                 VkCommandBufferBeginInfo.calloc(stack).sType$Default();
@@ -886,6 +893,9 @@ dependency.get(0)
             throw new IllegalStateException(
                     "vkQueuePresentKHR failed with VkResult=" + presentResult
             );
+        }
+        if (presentResult == org.lwjgl.vulkan.KHRSwapchain.VK_SUBOPTIMAL_KHR) {
+            needRecreate = true;
         }
 
         checkVk(
@@ -971,6 +981,7 @@ dependency.get(0)
             }
 
             vkDeviceWaitIdle(logicalDevice);
+            int previousFormat = swapchainFormat;
             destroyRenderFinishedSemaphores();
 
             for (long fb : framebuffers) {
@@ -987,6 +998,8 @@ dependency.get(0)
             }
             imageViews = new long[0];
 
+            DepthBuffer.destroy(logicalDevice);
+
             if (swapchain != 0L) {
                 org.lwjgl.vulkan.KHRSwapchain.vkDestroySwapchainKHR(logicalDevice, swapchain, null);
                 swapchain = 0L;
@@ -996,30 +1009,20 @@ dependency.get(0)
             createSwapchain(logger, stack);
             createImageViews(logger, stack);
             createRenderFinishedSemaphores(stack);
+            DepthBuffer.create(logicalDevice, physicalDevice, swapchainWidth, swapchainHeight,
+                    swapchainImages.length);
 
-            DepthBuffer.destroy(logicalDevice);
-            DepthBuffer.create(logicalDevice, physicalDevice, swapchainWidth, swapchainHeight);
-
-            if (swapchainImages.length > commandBuffers.length) {
-                throw new IllegalStateException("Swapchain has more images than command buffers.");
-            }
-
-            framebuffers = new long[imageViews.length];
-            for (int i = 0; i < imageViews.length; i++) {
-                VkFramebufferCreateInfo framebufferInfo =
-                        VkFramebufferCreateInfo.calloc(stack)
-                                .sType$Default()
-                                .renderPass(renderPass)
-                                .pAttachments(stack.longs(imageViews[i], DepthBuffer.view()))
-                                .width(swapchainWidth)
-                                .height(swapchainHeight)
-                                .layers(1);
-                LongBuffer framebufferOut = stack.mallocLong(1);
-                checkVk(
-                        vkCreateFramebuffer(logicalDevice, framebufferInfo, null, framebufferOut),
-                        "vkCreateFramebuffer[recreate " + i + "]"
-                );
-                framebuffers[i] = framebufferOut.get(0);
+            if (swapchainFormat != previousFormat) {
+                TrianglePipeline.destroy(logicalDevice);
+                if (renderPass != 0L) {
+                    vkDestroyRenderPass(logicalDevice, renderPass, null);
+                    renderPass = 0L;
+                }
+                createRenderPassAndFramebuffers(logger, stack);
+                TrianglePipeline.create(logger, logicalDevice, physicalDevice, renderPass,
+                        swapchainWidth, swapchainHeight, graphicsQueue, graphicsQueueFamily);
+            } else {
+                createFramebuffers(logger, stack);
             }
 
             TrianglePipeline.setExtent(swapchainWidth, swapchainHeight);
@@ -1186,9 +1189,12 @@ dependency.get(0)
                 drawFailed = true;
                 return;
             }
+            if (acquire == org.lwjgl.vulkan.KHRSwapchain.VK_SUBOPTIMAL_KHR) {
+                needRecreate = true;
+            }
 
             int index = imageIndex.get(0);
-            if (index < 0 || index >= commandBuffers.length || index >= framebuffers.length) {
+            if (index < 0 || index >= framebuffers.length) {
                 logger.warn("[AetherVK] drawFrame stopped: invalid image index {}.", index);
                 drawFailed = true;
                 return;
@@ -1260,6 +1266,9 @@ dependency.get(0)
             if (presentResult == org.lwjgl.vulkan.KHRSwapchain.VK_ERROR_OUT_OF_DATE_KHR) {
                 needRecreate = true;
                 return;
+            }
+            if (presentResult == org.lwjgl.vulkan.KHRSwapchain.VK_SUBOPTIMAL_KHR) {
+                needRecreate = true;
             }
             if (presentResult != VK_SUCCESS
                     && presentResult != org.lwjgl.vulkan.KHRSwapchain.VK_SUBOPTIMAL_KHR) {

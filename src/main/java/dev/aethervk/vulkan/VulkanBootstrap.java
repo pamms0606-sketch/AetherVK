@@ -387,8 +387,6 @@ logger.info("[AetherVK] GLFW Vulkan surface extensions enabled.");
                     "Surface does not support color-attachment swapchain images."
             );
         }
-        logger.info("[AetherVK] DEBUG supportedUsageFlags=0x{}",
-        Integer.toHexString(capabilities.supportedUsageFlags()));
         IntBuffer formatCount = stack.ints(0);
         checkVk(
                 KHRSurface.vkGetPhysicalDeviceSurfaceFormatsKHR(
@@ -456,7 +454,6 @@ logger.info("[AetherVK] GLFW Vulkan surface extensions enabled.");
         }
 
         int supportedAlpha = capabilities.supportedCompositeAlpha();
-        logger.info("[AetherVK] DEBUG supportedCompositeAlpha=0x{}", Integer.toHexString(supportedAlpha));
         int compositeAlpha = KHRSurface.VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
         int[] alphaOptions = {
                 KHRSurface.VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR,
@@ -474,7 +471,7 @@ logger.info("[AetherVK] GLFW Vulkan surface extensions enabled.");
             }
         }
 
-        logger.info("[AetherVK] DEBUG selected compositeAlpha=0x{}", Integer.toHexString(compositeAlpha));
+        logger.info("[AetherVK] Selected compositeAlpha=0x{}", Integer.toHexString(compositeAlpha));
 
         if (!alphaFound) {
             throw new IllegalStateException("Surface exposes no supported composite alpha mode.");
@@ -508,8 +505,8 @@ logger.info("[AetherVK] GLFW Vulkan surface extensions enabled.");
         swapchainWidth = extent.width();
         swapchainHeight = extent.height();
 
-logger.info("[AetherVK] DEBUG selected swapchain format={}", selectedFormat.format());
-logger.info("[AetherVK] DEBUG selected color space={}", selectedFormat.colorSpace());
+logger.info("[AetherVK] Selected swapchain format={}", selectedFormat.format());
+logger.info("[AetherVK] Selected color space={}", selectedFormat.colorSpace());
         IntBuffer actualImageCount = stack.ints(0);
         checkVk(
                 org.lwjgl.vulkan.KHRSwapchain.vkGetSwapchainImagesKHR(
@@ -827,10 +824,6 @@ dependency.get(0)
                 .float32(1, 0.0f)
                 .float32(2, 0.0f)
                 .float32(3, 1.0f);
-                logger.info("[AetherVK] DEBUG clearValueCount={}", clearValues.remaining());
-                logger.info("[AetherVK] DEBUG clear R={}", clearValues.get(0).color().float32(0));
-                logger.info("[AetherVK] DEBUG clear G={}", clearValues.get(0).color().float32(1));
-                logger.info("[AetherVK] DEBUG clear B={}", clearValues.get(0).color().float32(2)); 
         org.lwjgl.vulkan.VkRect2D renderArea =
                 org.lwjgl.vulkan.VkRect2D.calloc(stack)
                         .offset(org.lwjgl.vulkan.VkOffset2D.calloc(stack).set(0, 0))
@@ -887,7 +880,6 @@ dependency.get(0)
                         graphicsQueue,
                         presentInfo
                 );
-                  logger.info("[AetherVK] DEBUG presentResult={}", presentResult);
         if (presentResult != VK_SUCCESS &&
                 presentResult != org.lwjgl.vulkan.KHRSwapchain.VK_SUBOPTIMAL_KHR) {
             throw new IllegalStateException(

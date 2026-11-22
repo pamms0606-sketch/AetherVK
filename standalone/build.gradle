@@ -1,0 +1,47 @@
+plugins {
+    id 'application'
+}
+
+java {
+    toolchain.languageVersion = JavaLanguageVersion.of(21)
+}
+
+repositories {
+    mavenCentral()
+}
+
+// Same versions as the mod (Minecraft 1.21.1 uses LWJGL 3.3.3 and JOML 1.10.5).
+def lwjglVersion = '3.3.3'
+def osName = System.getProperty('os.name').toLowerCase(Locale.ROOT)
+def osArch = System.getProperty('os.arch').toLowerCase(Locale.ROOT)
+def lwjglClassifier
+if (osName.contains('mac')) {
+    lwjglClassifier = (osArch.contains('aarch64') || osArch.contains('arm64')) ? 'natives-macos-arm64' : 'natives-macos'
+} else {
+    throw new GradleException("AetherVK standalone only supports macOS for now: ${osName}/${osArch}")
+}
+
+dependencies {
+    implementation "org.lwjgl:lwjgl:${lwjglVersion}"
+    implementation "org.lwjgl:lwjgl-glfw:${lwjglVersion}"
+    implementation "org.lwjgl:lwjgl-vulkan:${lwjglVersion}"
+    runtimeOnly "org.lwjgl:lwjgl:${lwjglVersion}:${lwjglClassifier}"
+    runtimeOnly "org.lwjgl:lwjgl-glfw:${lwjglVersion}:${lwjglClassifier}"
+    runtimeOnly "org.lwjgl:lwjgl-vulkan:${lwjglVersion}:${lwjglClassifier}"
+    implementation 'org.joml:joml:1.10.5'
+    implementation 'org.slf4j:slf4j-api:2.0.16'
+    runtimeOnly 'org.slf4j:slf4j-simple:2.0.16'
+}
+
+application {
+    mainClass = 'dev.aethervk.standalone.Main'
+    // GLFW on macOS must run on the first thread.
+    applicationDefaultJvmArgs = ['-XstartOnFirstThread',
+            '-Dorg.slf4j.simpleLogger.showDateTime=true',
+            '-Dorg.slf4j.simpleLogger.dateTimeFormat=HH:mm:ss.SSS']
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = 'UTF-8'
+    options.release = 21
+}

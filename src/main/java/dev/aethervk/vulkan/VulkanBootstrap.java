@@ -209,11 +209,19 @@ logger.info("[AetherVK] GLFW Vulkan surface extensions enabled.");
         }
     }
 
+    private static String envOrUnset(String name) {
+        String value = System.getenv(name);
+        return value == null || value.isBlank() ? "<not set>" : value;
+    }
+
     private static void configureMacLoader(Logger logger) {
         String os = System.getProperty("os.name", "").toLowerCase();
         if (!os.contains("mac")) {
             return;
         }
+
+        logger.info("[AetherVK] Environment: VULKAN_SDK={}, VK_DRIVER_FILES={}, VK_ICD_FILENAMES={}",
+                envOrUnset("VULKAN_SDK"), envOrUnset("VK_DRIVER_FILES"), envOrUnset("VK_ICD_FILENAMES"));
 
         // Prefer the Vulkan SDK loader when VULKAN_SDK is configured. On Apple Silicon,
         // a current SDK can expose the KosmicKrisp Vulkan-on-Metal driver.
@@ -234,6 +242,35 @@ logger.info("[AetherVK] GLFW Vulkan surface extensions enabled.");
         } else {
             logger.warn("[AetherVK] VULKAN_SDK is not configured. LWJGL will use its default macOS Vulkan native provider.");
             logger.warn("[AetherVK] For Apple Silicon development, install the current Vulkan SDK and use its KosmicKrisp driver when available.");
+        }
+    }
+
+    /** Logging only: driver identity via VK_KHR_driver_properties. Never affects device selection. */
+    private static void logDriverProperties(Logger logger, MemoryStack stack, VkPhysicalDevice device,
+                                            VkPhysicalDeviceProperties properties, int index) {
+        // Own stack frame: enumerateDeviceExtensions allocates ~40 KB; popping it here keeps the caller's stack free.
+        try (MemoryStack frame = MemoryStack.stackPush()) {
+            stack = frame;
+            if (!instance.getCapabilities().VK_KHR_get_physical_device_properties2) {
+                logger.info("[AetherVK] Driver[{}]: properties2 not enabled on instance; driver identity unavailable.", index);
+                return;
+            }
+            if (!enumerateDeviceExtensions(device, stack).contains("VK_KHR_driver_properties")) {
+                logger.info("[AetherVK] Driver[{}]: VK_KHR_driver_properties not advertised by device; driver identity unavailable.", index);
+                return;
+            }
+            org.lwjgl.vulkan.VkPhysicalDeviceDriverProperties driver =
+                    org.lwjgl.vulkan.VkPhysicalDeviceDriverProperties.calloc(stack).sType$Default();
+            org.lwjgl.vulkan.VkPhysicalDeviceProperties2 props2 =
+                    org.lwjgl.vulkan.VkPhysicalDeviceProperties2.calloc(stack).sType$Default().pNext(driver.address());
+            org.lwjgl.vulkan.KHRGetPhysicalDeviceProperties2.vkGetPhysicalDeviceProperties2KHR(device, props2);
+            logger.info("[AetherVK] Driver[{}]: driverID={}, driverName='{}', driverInfo='{}', driverVersion=0x{}, apiVersion={}.{}.{}",
+                    index, driver.driverID(), driver.driverNameString(), driver.driverInfoString(),
+                    Integer.toHexString(properties.driverVersion()),
+                    VK_VERSION_MAJOR(properties.apiVersion()), VK_VERSION_MINOR(properties.apiVersion()),
+                    VK_VERSION_PATCH(properties.apiVersion()));
+        } catch (Throwable error) {
+            logger.warn("[AetherVK] Driver[{}]: could not query driver properties: {}", index, error.toString());
         }
     }
 
@@ -274,6 +311,7 @@ logger.info("[AetherVK] GLFW Vulkan surface extensions enabled.");
             String name = properties.deviceNameString();
             logger.info("[AetherVK] Vulkan device: {} (type={}, graphicsQueue={})",
                     name, deviceTypeName(properties.deviceType()), graphicsQueue);
+            logDriverProperties(logger, stack, physicalDevice, properties, i);
             if (graphicsQueue >= 0) {
                 candidates.add(new DeviceCandidate(physicalDevice, name, graphicsQueue));
             }
@@ -284,6 +322,7 @@ logger.info("[AetherVK] GLFW Vulkan surface extensions enabled.");
         }
 
         DeviceCandidate selected = candidates.get(0);
+        logger.info("[AetherVK] Selected device: '{}' (first candidate with a graphics queue).", selected.name());
         Set<String> deviceExtensions = enumerateDeviceExtensions(selected.device(), stack);
         List<String> enabledNames = new ArrayList<>();
         if (!deviceExtensions.contains("VK_KHR_swapchain")) {
